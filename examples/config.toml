@@ -1,0 +1,13 @@
+version = 1
+
+[watch]
+path="~/Downloads"
+ignore = ["*.part", "*.crdownload", ".*"]
+settle_seconds = 2
+
+on_conflict = "rename" # rename | skip | overwrite
+[defaults]
+dry_run = false
+
+[[rules]]
+

@@ -1,0 +1,29 @@
+version = 1
+
+[watch]
+path = "~/Downloads"
+ignore = ["*.part", "*.crdownload", ".*"]
+settle_seconds = 2
+
+[defaults]
+on_conflict = "rename"   # rename | skip | overwrite
+dry_run = false
+
+[[rules]]
+name = "documents"
+match.extensions = ["pdf", "docx", "odt"]
+action = "move"
+destination = "~/Documents/Inbox"
+
+[[rules]]
+name = "invoices"
+match.glob = "invoice-*"
+match.extensions = ["pdf"]
+destination = "~/Documents/Invoices/{year}"
+
+[[rules]]
+name = "archives"
+enabled = false
+match.extensions = ["zip", "tar.gz"]
+action = "move"
+destination = "~/Archives"
