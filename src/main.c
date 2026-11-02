@@ -1,4 +1,5 @@
 #include <errno.h>
+#include <linux/limits.h>
 #include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -6,25 +7,12 @@
 #include <unistd.h>
 #include <string.h>
 #include <libgen.h>
+#include "file.c"
 
 #define DIR "/home/redonxharja/downloads"
 
-static void file_move(const char *dir, size_t dir_len, const char *file_name, size_t len) {
-  static char out_path[] = "/home/redonxharja";
-  char original_path[256];
-  char final_path[256];
-
-  snprintf(original_path, dir_len + len + 1, "%s%s", dir, file_name);
-  snprintf(final_path, sizeof(out_path) + len + 1, "%s/%s", out_path, file_name);
-
-  printf("Moving to %s\n", final_path);
-  rename(original_path, final_path);
-}
-
 static void events_handle(int fd, int *wd, int argc, char *argv[]) {
-  // char buf[sizeof(struct inotify_event) + NAME_MAX + 1] 
-  //   __attribute__((aligned(__alignof__(struct inotify_event))));
-  char buf[4096] __attribute__((aligned(__alignof__(struct inotify_event))));
+  char buf[sizeof(struct inotify_event) + NAME_MAX + 1] __attribute__((aligned(__alignof__(struct inotify_event))));
 
   const struct inotify_event *event; 
 
@@ -106,7 +94,7 @@ int main(int argc, char *argv[]) {
   }
 
   for (i = 1; i < argc; i++) {
-    wd[i] = inotify_add_watch(fd, argv[1], IN_OPEN | IN_CLOSE | IN_ATTRIB | IN_CREATE | IN_MOVED_FROM | IN_MOVED_TO);
+    wd[i] = inotify_add_watch(fd, argv[1], IN_CLOSE_WRITE | IN_MOVED_TO);
 
     if (wd[i] == -1) {
       fprintf(stderr, "Cannot watch '%s': %s\n", argv[i], strerror(errno));
