@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -Wall -Wextra 
+CFLAGS = -Wall -Wextra -g
 VENDOR_CFLAGS = ""
 VENDOR_DIR = "./vendor"
 
