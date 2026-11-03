@@ -8,9 +8,10 @@
 #include <unistd.h>
 #include <string.h>
 #include <libgen.h>
-#include "file.c"
+#include "file.h"
 #include <sys/signalfd.h>
 #include "dictionary.h"
+#include "app.h"
 
 static void events_handle(Dictionary *dict, int fd, int *wd, int argc, char *argv[]) {
   char buf[sizeof(struct inotify_event) + NAME_MAX + 1] __attribute__((aligned(__alignof__(struct inotify_event))));
@@ -52,7 +53,7 @@ static void events_handle(Dictionary *dict, int fd, int *wd, int argc, char *arg
       if (event->mask & (IN_CLOSE_WRITE | IN_MOVED_TO)) {
         for (size_t i = 1; i < argc; ++i) {
           if (wd[i] == event->wd && event->len) {
-            file_move(dict, argv[i], strlen(argv[1]), event->name, strlen(event->name));
+            file_move(dict, argv[i], event->name);
             break;
           }
         }
@@ -83,8 +84,10 @@ ssize_t signal_setup() {
 }
 
 
-void kvp_key_free(void *p) {
+void kvp_dir_free(void *p) {
   const Kvp* kvp = p;
+  const DestDir *dir = kvp->value;
+  free((void*)dir);
   free((void*)kvp->key);
 }
 
@@ -102,8 +105,10 @@ int main(int argc, char *argv[]) {
   struct pollfd fds[2];
 
   Dictionary *dict = dict_init();
-  dict_insert(dict, ".pdf", "/home/redonxharja/projects/dir-watcher/pdfs");
-  dict_insert(dict, ".zip", "/home/redonxharja/projects/dir-watcher/zips");
+  DestDir *pdfs = setup(".", "./pdfs");
+  DestDir *zips = setup(".", "./zips");
+  dict_insert(dict, ".pdf", pdfs);
+  dict_insert(dict, ".zip", zips);
 
   if (argc < 2) {
     printf("Usage : %s PATH [PATH ...]\n", argv[0]);
@@ -171,6 +176,6 @@ int main(int argc, char *argv[]) {
   printf("Listening for events stopped.\n");
   close(fd);
   free(wd);
-  dict_free(dict, kvp_key_free);
+  dict_free(dict, kvp_dir_free);
   exit(EXIT_SUCCESS);
 }

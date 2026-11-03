@@ -1,5 +1,5 @@
 CC := gcc
-CPPFLAGS := -Iinclude -MMD -MP
+CPPFLAGS := -Iinclude -MMD -MP -D_GNU_SOURCE
 CFLAGS := -std=gnu17 -Wall -Wextra -g 
 
 SRCS := $(wildcard src/*.c)
