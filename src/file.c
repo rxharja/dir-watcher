@@ -15,7 +15,7 @@ static char* file_dir(const Dictionary *dict, const char *file_name) {
   return path;
 }
 
-static void file_move(const Dictionary *dict, const char *dir, size_t dir_len, const char *file_name, size_t len) {
+static void file_move(const Dictionary *dict, const char *dir, const char *file_name) {
   char original_path[PATH_MAX];
   char full_new_path[PATH_MAX];
 
@@ -24,6 +24,8 @@ static void file_move(const Dictionary *dict, const char *dir, size_t dir_len, c
 
   snprintf(original_path, PATH_MAX, "%s/%s", dir, file_name);
   snprintf(full_new_path, PATH_MAX, "%s/%s", path, file_name);
+
   printf("Moving %s to %s\n", original_path, full_new_path);
+
   rename(original_path, full_new_path);
 }
