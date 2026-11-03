@@ -1,13 +1,9 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
-
+#include "file.h"
 
 static size_t file_dir(const char *file_name, size_t len, char *out_dir) {
-  static const char pdfs[] = "/home/redonxharja/pdfs";
-  static const char zips[] = "/home/redonxharja/zips";
-  static const char default_dir[] = "/home/redonxharja";
-
   const char *dot = strrchr(file_name, '.');
 
   if (!dot || dot == file_name) return 0;

@@ -1,16 +1,24 @@
-CC = gcc
-CFLAGS = -Wall -Wextra -g
-VENDOR_CFLAGS = ""
-VENDOR_DIR = "./vendor"
+CC := gcc
+CPPFLAGS := -Iinclude -MMD -MP
+CFLAGS := -std=gnu17 -Wall -Wextra -g 
 
-tomlc:
-	${CC} ${VENDOR_CFLAGS} -isystem ${VENDOR_DIR}/tomlc17-R261003/
+SRCS := $(wildcard src/*.c)
+OBJS := $(SRCS:src/%.c=build/%.o)
+DEPS := $(OBJS:.o=.d)
 
-all:
-	${CC} ${CFLAGS} -o main ./src/main.c ./src/file.c
+VENDOR_DIR := vendor
+VENDOR_CFLAGS :=
+
+dir-watcher: $(OBJS)
+	$(CC) $(CFLAGS) $^ -o $@
+
+build/%.o: src/%.c
+	@mkdir -p $(@D)
+	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm main
+	rm -rf build dir-watcher
 
-.PHONY:
-	all clean
+.PHONY: clean
+
+-include $(DEPS)

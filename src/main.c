@@ -1,6 +1,7 @@
 #include <errno.h>
 #include <linux/limits.h>
 #include <poll.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/inotify.h>
@@ -8,8 +9,7 @@
 #include <string.h>
 #include <libgen.h>
 #include "file.c"
-
-#define DIR "/home/redonxharja/downloads"
+#include <sys/signalfd.h>
 
 static void events_handle(int fd, int *wd, int argc, char *argv[]) {
   char buf[sizeof(struct inotify_event) + NAME_MAX + 1] __attribute__((aligned(__alignof__(struct inotify_event))));
@@ -31,12 +31,7 @@ static void events_handle(int fd, int *wd, int argc, char *argv[]) {
 
     for (char *ptr = buf; ptr < buf + size; ptr += sizeof(struct inotify_event) + event->len) {
       event = (const struct inotify_event*)ptr;
-      if (event->mask & IN_OPEN) printf("IN_OPEN: ");
-      if (event->mask & IN_CREATE) printf("IN_CREATE: ");
-      if (event->mask & IN_ATTRIB) printf("IN_ATTRIB: ");
-      if (event->mask & IN_CLOSE_NOWRITE) printf("IN_CLOSE_NOWRITE: ");
       if (event->mask & IN_CLOSE_WRITE) printf("IN_CLOSE_WRITE: ");
-      if (event->mask & IN_MOVED_FROM) printf("IN_MOVED_FROM: ");
       if (event->mask & IN_MOVED_TO) printf("IN_MOVED_TO: ");
     }
 
@@ -62,8 +57,28 @@ static void events_handle(int fd, int *wd, int argc, char *argv[]) {
         }
       }
     }
-
   }
+}
+
+ssize_t signal_setup() {
+  sigset_t mask;
+  sigemptyset(&mask);
+  sigaddset(&mask, SIGINT);
+  sigaddset(&mask, SIGTERM);
+
+  if (sigprocmask(SIG_BLOCK, &mask, NULL) == -1) {
+    perror("sigprocmask");
+    exit(EXIT_FAILURE); 
+  }
+
+  int sig_fd = signalfd(-1, &mask, SFD_CLOEXEC | SFD_NONBLOCK);
+
+  if (sig_fd == -1) {
+    perror("signalfd");
+    exit(EXIT_FAILURE);
+  }
+
+  return sig_fd;
 }
 
 int main(int argc, char *argv[]) {
@@ -78,7 +93,7 @@ int main(int argc, char *argv[]) {
     exit (EXIT_FAILURE);
   }
 
-  printf("Press ENTER key to terminate.\n");
+  printf("Press Ctrl+C to terminate.\n");
 
   fd = inotify_init1(IN_NONBLOCK);
   if (fd == -1) {
@@ -102,8 +117,11 @@ int main(int argc, char *argv[]) {
     }
   }
 
+  struct signalfd_siginfo fdsi;
+  ssize_t signal_size;
+
   nfds = 2;
-  fds[0].fd = STDIN_FILENO; // console input
+  fds[0].fd = signal_setup(); // signal input
   fds[0].events = POLLIN;
 
   fds[1].fd = fd; // inotify input
@@ -121,7 +139,16 @@ int main(int argc, char *argv[]) {
 
     if (poll_num > 0) {
       if (fds[0].revents & POLLIN) {
-        while (read(STDIN_FILENO, &buf, 1) > 0 && buf != '\n') continue;
+        signal_size = read(fds[0].fd, &fdsi, sizeof(fdsi));
+
+        if (signal_size != sizeof(fdsi)) {
+          perror("signalfd");
+          exit(EXIT_FAILURE);
+        }
+
+        if (fdsi.ssi_signo == SIGINT || fdsi.ssi_signo == SIGTERM) exit(EXIT_SUCCESS);
+        else continue;
+
         break;
       }
 
