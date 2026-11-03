@@ -1,36 +1,29 @@
+#include <linux/limits.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
 #include "file.h"
+#include "dictionary.h"
 
-static size_t file_dir(const char *file_name, size_t len, char *out_dir) {
+static char* file_dir(const Dictionary *dict, const char *file_name) {
   const char *dot = strrchr(file_name, '.');
+  if (!dot || dot == file_name) return NULL;
 
-  if (!dot || dot == file_name) return 0;
+  char *path = dict_find(dict, dot);
+  if (path == NULL) return default_dir;
 
-  if (strcmp(".pdf", dot) == 0) {
-    snprintf(out_dir, sizeof(pdfs), pdfs); 
-    return sizeof(pdfs);
-  }
-
-  if (strcmp(".zip", dot) == 0) {
-    snprintf(out_dir, sizeof(zips), zips); 
-    return sizeof(zips);
-  } 
-
-  return 0;
+  return path;
 }
 
-static void file_move(const char *dir, size_t dir_len, const char *file_name, size_t len) {
-  char original_path[256];
-  char final_dir[256];
-  char final_path[256];
+static void file_move(const Dictionary *dict, const char *dir, size_t dir_len, const char *file_name, size_t len) {
+  char original_path[PATH_MAX];
+  char full_new_path[PATH_MAX];
 
-  size_t final_dir_len = file_dir(file_name, len, final_dir);
+  char* path = file_dir(dict, file_name);
+  if (path == NULL) return; // todo: handle later
 
-  snprintf(original_path, dir_len + len + 1, "%s%s", dir, file_name);
-  snprintf(final_path, final_dir_len + len + 1, "%s/%s", final_dir, file_name);
-
-  printf("Moving to %s\n", final_path);
-  rename(original_path, final_path);
+  snprintf(original_path, PATH_MAX, "%s/%s", dir, file_name);
+  snprintf(full_new_path, PATH_MAX, "%s/%s", path, file_name);
+  printf("Moving %s to %s\n", original_path, full_new_path);
+  rename(original_path, full_new_path);
 }

@@ -10,8 +10,9 @@
 #include <libgen.h>
 #include "file.c"
 #include <sys/signalfd.h>
+#include "dictionary.h"
 
-static void events_handle(int fd, int *wd, int argc, char *argv[]) {
+static void events_handle(Dictionary *dict, int fd, int *wd, int argc, char *argv[]) {
   char buf[sizeof(struct inotify_event) + NAME_MAX + 1] __attribute__((aligned(__alignof__(struct inotify_event))));
 
   const struct inotify_event *event; 
@@ -51,7 +52,7 @@ static void events_handle(int fd, int *wd, int argc, char *argv[]) {
       if (event->mask & (IN_CLOSE_WRITE | IN_MOVED_TO)) {
         for (size_t i = 1; i < argc; ++i) {
           if (wd[i] == event->wd && event->len) {
-            file_move(argv[i], strlen(argv[1]), event->name, strlen(event->name));
+            file_move(dict, argv[i], strlen(argv[1]), event->name, strlen(event->name));
             break;
           }
         }
@@ -81,12 +82,28 @@ ssize_t signal_setup() {
   return sig_fd;
 }
 
+
+void kvp_key_free(void *p) {
+  const Kvp* kvp = p;
+  free((void*)kvp->key);
+}
+
+// on init
+// load in config
+// process folder immediately according to config rules
+// then run through the inotify loop
 int main(int argc, char *argv[]) {
   char buf;
   int fd, i, poll_num;
   int *wd;
+  struct signalfd_siginfo fdsi;
+  ssize_t signal_size;
   nfds_t nfds;
   struct pollfd fds[2];
+
+  Dictionary *dict = dict_init();
+  dict_insert(dict, ".pdf", "/home/redonxharja/projects/dir-watcher/pdfs");
+  dict_insert(dict, ".zip", "/home/redonxharja/projects/dir-watcher/zips");
 
   if (argc < 2) {
     printf("Usage : %s PATH [PATH ...]\n", argv[0]);
@@ -95,7 +112,7 @@ int main(int argc, char *argv[]) {
 
   printf("Press Ctrl+C to terminate.\n");
 
-  fd = inotify_init1(IN_NONBLOCK);
+  fd = inotify_init1(IN_CLOEXEC | IN_NONBLOCK);
   if (fd == -1) {
     perror("inotify_init1");
     exit(EXIT_FAILURE);
@@ -116,9 +133,6 @@ int main(int argc, char *argv[]) {
       exit(EXIT_FAILURE);
     }
   }
-
-  struct signalfd_siginfo fdsi;
-  ssize_t signal_size;
 
   nfds = 2;
   fds[0].fd = signal_setup(); // signal input
@@ -146,21 +160,17 @@ int main(int argc, char *argv[]) {
           exit(EXIT_FAILURE);
         }
 
-        if (fdsi.ssi_signo == SIGINT || fdsi.ssi_signo == SIGTERM) exit(EXIT_SUCCESS);
+        if (fdsi.ssi_signo == SIGINT || fdsi.ssi_signo == SIGTERM) break;
         else continue;
-
-        break;
       }
 
-      if (fds[1].revents & POLLIN) events_handle(fd, wd, argc, argv);
+      if (fds[1].revents & POLLIN) events_handle(dict, fd, wd, argc, argv);
     }
   }
 
   printf("Listening for events stopped.\n");
-
   close(fd);
-
   free(wd);
-
+  dict_free(dict, kvp_key_free);
   exit(EXIT_SUCCESS);
 }
