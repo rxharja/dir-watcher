@@ -105,10 +105,29 @@ int main(int argc, char *argv[]) {
   struct pollfd fds[2];
 
   Dictionary *dict = dict_init();
+
   DestDir *pdfs = setup(".", "./pdfs");
+  if (pdfs == NULL) {
+    perror("setup");
+    exit(EXIT_FAILURE);
+  }
+
   DestDir *zips = setup(".", "./zips");
+  if (zips == NULL) {
+    perror("setup");
+    exit(EXIT_FAILURE);
+  }
+
+  DestDir *configs = setup(".", "./configs");
+  if (configs == NULL) {
+    perror("setup");
+    exit(EXIT_FAILURE);
+  }
+
   dict_insert(dict, ".pdf", pdfs);
   dict_insert(dict, ".zip", zips);
+  dict_insert(dict, ".json", configs);
+  dict_insert(dict, ".txt", configs);
 
   if (argc < 2) {
     printf("Usage : %s PATH [PATH ...]\n", argv[0]);

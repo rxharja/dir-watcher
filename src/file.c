@@ -1,3 +1,4 @@
+#include <libgen.h>
 #define _GNU_SOURCE
 #include <assert.h>
 #include <unistd.h>
@@ -73,14 +74,14 @@ static int file_tilde_expand(const char *dir_path, char *out) {
 static int file_relative_expand(const char *dir_path, char *out) {
   char real_path[PATH_MAX];
 
-  if (realpath(dir_path, real_path) == NULL) {
+  if (realpath(dir_path, real_path) == NULL && errno != ENOENT) {
     perror("realpath");
     return -1;
   }
 
-  const char *rel_dir_path = dir_path[0] == '.' ? dir_path + 1 : dir_path;
+  // const char *rel_dir_path = dir_path[0] == '.' ? dir_path + 1 : dir_path;
 
-  if (file_write_path_to_buf(real_path, rel_dir_path, out) != 0) {
+  if (file_write_path_to_buf(real_path, "", out) != 0) {
     printf("Cannot expand relative path for %s.\n", dir_path);
     return -1;
   }
@@ -96,7 +97,8 @@ int file_normalize(const char *base_dir, const char *dir_path, char *out) {
     printf("The supplied directory was empty.\n");
     return -1;
   }
-  else if (dir_path[0] == '~' && file_tilde_expand(path_ptr, out) < 0) {
+
+  if (dir_path[0] == '~' && file_tilde_expand(path_ptr, out) < 0) {
     printf("Cannot expand '~' for path %s.\n", dir_path);
     return -1;
   }
@@ -104,16 +106,33 @@ int file_normalize(const char *base_dir, const char *dir_path, char *out) {
     return file_relative_expand(dir_path, out);
   }
 
+  dirname(out);
+
   return 0;
 }
 
 // invariant: fully qualified path
 int file_dir_create(const char *dir_path) {
+  assert(dir_path);
+  assert(dir_path[0] == '/');
+
   char path_to_create[PATH_MAX];
   snprintf(path_to_create, PATH_MAX, "%s", dir_path);
+  char *slash = strchr(path_to_create + 1, '/');
+
+  while (slash != NULL) {
+    *slash = '\0';
+    int mkdir_res = mkdir(path_to_create, 0755);
+    *slash = '/';
+    if (mkdir_res != 0 && errno != EEXIST) {
+      perror("mkdir");
+      return -1;
+    }
+    slash = strchr(slash + 1, '/');
+  }
   // todo: walk the path, split on '/', create it segment by segment.
   // treat EEXIST as success
-  return -1;
+  return 0;
 }
 
 int file_dir_open(const char *dir_path) {
@@ -146,10 +165,10 @@ char* file_dir(const Dictionary *dict, const char *file_name) {
   const char *dot = strrchr(file_name, '.');
   if (!dot || dot == file_name) return NULL;
 
-  char *path = dict_find(dict, dot);
-  if (path == NULL) return default_dir;
+  DestDir *dir = dict_find(dict, dot);
+  if (dir == NULL) return default_dir;
 
-  return path;
+  return dir->path;
 }
 
 void file_move(const Dictionary *dict, const char *dir, const char *file_name) {
