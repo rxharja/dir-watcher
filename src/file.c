@@ -165,7 +165,7 @@ char* file_dir(const Dictionary *dict, const char *file_name) {
   const char *dot = strrchr(file_name, '.');
   if (!dot || dot == file_name) return NULL;
 
-  DestDir *dir = dict_find(dict, dot);
+  Dir *dir = dict_find(dict, dot);
   if (dir == NULL) return default_dir;
 
   return dir->path;

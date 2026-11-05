@@ -10,7 +10,12 @@ typedef struct {
   int fd;
   dev_t st_dev;
   char path[PATH_MAX];
-} DestDir;
+} Dir;
+
+typedef struct {
+  Dir watched_dir;
+  int wd;
+} WatchedDir;
 
 static const char default_dir[] = "/home/redonxharja/projects/dir-watcher/output";
 

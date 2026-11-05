@@ -3,7 +3,7 @@
 #include <unistd.h>
 
 // temporary function to reason about file set up
-DestDir* setup(const char *base_dir, const char *dest_dir_path) {
+Dir* setup(const char *base_dir, const char *dest_dir_path) {
   char qualified_path[PATH_MAX];
   if (file_normalize(base_dir, dest_dir_path, qualified_path) != 0) {
     perror("file_normalize");
@@ -26,7 +26,7 @@ DestDir* setup(const char *base_dir, const char *dest_dir_path) {
     return NULL;
   }
 
-  DestDir *watched_file = malloc(sizeof(DestDir));
+  Dir *watched_file = malloc(sizeof(Dir));
 
   if (!watched_file) {
     perror("malloc");

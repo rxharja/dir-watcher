@@ -86,7 +86,7 @@ ssize_t signal_setup() {
 
 void kvp_dir_free(void *p) {
   const Kvp* kvp = p;
-  const DestDir *dir = kvp->value;
+  const Dir *dir = kvp->value;
   free((void*)dir);
   free((void*)kvp->key);
 }
@@ -106,19 +106,19 @@ int main(int argc, char *argv[]) {
 
   Dictionary *dict = dict_init();
 
-  DestDir *pdfs = setup(".", "./pdfs");
+  Dir *pdfs = setup(".", "./pdfs");
   if (pdfs == NULL) {
     perror("setup");
     exit(EXIT_FAILURE);
   }
 
-  DestDir *zips = setup(".", "./zips");
+  Dir *zips = setup(".", "./zips");
   if (zips == NULL) {
     perror("setup");
     exit(EXIT_FAILURE);
   }
 
-  DestDir *configs = setup(".", "./configs");
+  Dir *configs = setup(".", "./configs");
   if (configs == NULL) {
     perror("setup");
     exit(EXIT_FAILURE);
