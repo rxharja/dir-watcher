@@ -1,5 +1,4 @@
 #include <libgen.h>
-#define _GNU_SOURCE
 #include <assert.h>
 #include <unistd.h>
 #include <asm-generic/errno-base.h>
@@ -9,7 +8,6 @@
 #include <stdio.h>
 #include <string.h>
 #include "file.h"
-#include "dictionary.h"
 #include <fcntl.h>
 #include <errno.h>
 #include <stdlib.h>
@@ -89,7 +87,7 @@ static int file_relative_expand(const char *dir_path, char *out) {
   return 0;
 }
 
-int file_normalize(const char *base_dir, const char *dir_path, char *out) {
+int file_normalize(const char *dir_path, char *out) {
   assert(out != NULL);
   const char *path_ptr = dir_path;
 
@@ -112,43 +110,47 @@ int file_normalize(const char *base_dir, const char *dir_path, char *out) {
 }
 
 // invariant: fully qualified path
-int file_dir_create(const char *dir_path) {
+int file_dir_create(const CanonicalPath *dir_path) {
   assert(dir_path);
-  assert(dir_path[0] == '/');
 
   char path_to_create[PATH_MAX];
-  snprintf(path_to_create, PATH_MAX, "%s", dir_path);
+  // todo: actually handle the length provided by the dir_path
+  snprintf(path_to_create, PATH_MAX - 1, "%s/", dir_path->s);
+
   char *slash = strchr(path_to_create + 1, '/');
 
   while (slash != NULL) {
     *slash = '\0';
     int mkdir_res = mkdir(path_to_create, 0755);
     *slash = '/';
+
     if (mkdir_res != 0 && errno != EEXIST) {
       perror("mkdir");
       return -1;
     }
+
     slash = strchr(slash + 1, '/');
   }
-  // todo: walk the path, split on '/', create it segment by segment.
-  // treat EEXIST as success
+
   return 0;
 }
 
-int file_dir_open(const char *dir_path) {
-  int dir_fd = open(dir_path, O_PATH | O_CLOEXEC | O_DIRECTORY);
+int file_dir_open(const CanonicalPath *dir_path, int *dir_fd) {
+  *dir_fd = open(dir_path->s, O_PATH | O_CLOEXEC | O_DIRECTORY);
 
-  if (dir_fd == -1) {
+  if (*dir_fd == -1) {
     int errsv = errno;
+    printf("Error opening %s: ", dir_path->s);
     strerror(errsv);
-    file_err_show(errsv, dir_path);
+    printf("%s\n", strerror(errsv));
+    file_err_show(errsv, dir_path->s);
     return -1;
   }
 
-  return dir_fd;
+  return 0;
 }
 
-int file_dir_stat(const int dir_fd) {
+int file_dir_stat(const int dir_fd, dev_t *st_dev) {
   struct stat stat_buf;
   int res = fstat(dir_fd, &stat_buf);
 
@@ -157,31 +159,31 @@ int file_dir_stat(const int dir_fd) {
     return res;
   }
 
-  return stat_buf.st_dev;
+  *st_dev = stat_buf.st_dev;
+  return 0;
 }
 
+// a
+int file_basename_build(const char * fpath, BaseName *b) {
+  assert(fpath);
+  assert(b);
 
-char* file_dir(const Dictionary *dict, const char *file_name) {
-  const char *dot = strrchr(file_name, '.');
-  if (!dot || dot == file_name) return NULL;
+  b->name = fpath;
 
-  Dir *dir = dict_find(dict, dot);
-  if (dir == NULL) return default_dir;
+  const char *dot = strrchr(b->name, '.');
+  if (dot) b->ext  = dot;
+  if (dot == b->name) return -1;
 
-  return dir->path;
+  return 0;
 }
 
-void file_move(const Dictionary *dict, const char *dir, const char *file_name) {
-  char original_path[PATH_MAX];
-  char full_new_path[PATH_MAX];
+int file_move(const DirHandle *origin, const DirHandle* destination, const BaseName *bname) {
+  int res = renameat2(origin->fd, bname->name, destination->fd, bname->name, RENAME_NOREPLACE);
+  if (res != 0) {
+    perror("renameat2");
+    return -1;
+  }
 
-  char* path = file_dir(dict, file_name);
-  if (path == NULL) return; // todo: handle later
-
-  snprintf(original_path, PATH_MAX, "%s/%s", dir, file_name);
-  snprintf(full_new_path, PATH_MAX, "%s/%s", path, file_name);
-
-  printf("Moving %s to %s\n", original_path, full_new_path);
-
-  rename(original_path, full_new_path);
+  return 0;
 }
+

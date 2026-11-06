@@ -6,14 +6,12 @@
 #include <stdlib.h>
 #include <sys/inotify.h>
 #include <unistd.h>
-#include <string.h>
 #include <libgen.h>
 #include "file.h"
 #include <sys/signalfd.h>
-#include "dictionary.h"
 #include "app.h"
 
-static void events_handle(Dictionary *dict, int fd, int *wd, int argc, char *argv[]) {
+static void events_handle(AppCtx *app, int argc, char *argv[]) {
   char buf[sizeof(struct inotify_event) + NAME_MAX + 1] __attribute__((aligned(__alignof__(struct inotify_event))));
 
   const struct inotify_event *event; 
@@ -21,7 +19,7 @@ static void events_handle(Dictionary *dict, int fd, int *wd, int argc, char *arg
   ssize_t size;
 
   for (;;) {
-    size = read(fd, buf, sizeof buf);
+    size = read(app->handles.inotify_fd, buf, sizeof buf);
 
     if (size == -1 && errno != EAGAIN) {
       perror("read");
@@ -30,16 +28,15 @@ static void events_handle(Dictionary *dict, int fd, int *wd, int argc, char *arg
 
     if (size <= 0) break;
 
-
     for (char *ptr = buf; ptr < buf + size; ptr += sizeof(struct inotify_event) + event->len) {
       event = (const struct inotify_event*)ptr;
       if (event->mask & IN_CLOSE_WRITE) printf("IN_CLOSE_WRITE: ");
       if (event->mask & IN_MOVED_TO) printf("IN_MOVED_TO: ");
     }
 
-    for (size_t i = 1; i < argc; ++i) {
-      if (wd[i] == event->wd) {
-        printf("%s/", argv[i]);
+    for (int i = 0; i < argc; ++i) {
+      if (app->handles.watched[i].wd == event->wd) {
+        printf("%s/", argv[i + 1]);
         break;
       }
     }
@@ -51,9 +48,9 @@ static void events_handle(Dictionary *dict, int fd, int *wd, int argc, char *arg
     for (char *ptr = buf; ptr < buf + size; ptr += sizeof(struct inotify_event) + event->len) {
       event = (const struct inotify_event*)ptr;
       if (event->mask & (IN_CLOSE_WRITE | IN_MOVED_TO)) {
-        for (size_t i = 1; i < argc; ++i) {
-          if (wd[i] == event->wd && event->len) {
-            file_move(dict, argv[i], event->name);
+        for (int i = 0; i < argc; ++i) {
+          if (app->handles.watched[i].wd == event->wd && event->len) {
+            file_move_handle(app, &app->handles.watched[i].dir, event->name);
             break;
           }
         }
@@ -83,90 +80,34 @@ ssize_t signal_setup() {
   return sig_fd;
 }
 
-
-void kvp_dir_free(void *p) {
-  const Kvp* kvp = p;
-  const Dir *dir = kvp->value;
-  free((void*)dir);
-  free((void*)kvp->key);
-}
-
-// on init
-// load in config
-// process folder immediately according to config rules
-// then run through the inotify loop
 int main(int argc, char *argv[]) {
-  char buf;
-  int fd, i, poll_num;
-  int *wd;
   struct signalfd_siginfo fdsi;
   ssize_t signal_size;
-  nfds_t nfds;
   struct pollfd fds[2];
-
-  Dictionary *dict = dict_init();
-
-  Dir *pdfs = setup(".", "./pdfs");
-  if (pdfs == NULL) {
-    perror("setup");
-    exit(EXIT_FAILURE);
-  }
-
-  Dir *zips = setup(".", "./zips");
-  if (zips == NULL) {
-    perror("setup");
-    exit(EXIT_FAILURE);
-  }
-
-  Dir *configs = setup(".", "./configs");
-  if (configs == NULL) {
-    perror("setup");
-    exit(EXIT_FAILURE);
-  }
-
-  dict_insert(dict, ".pdf", pdfs);
-  dict_insert(dict, ".zip", zips);
-  dict_insert(dict, ".json", configs);
-  dict_insert(dict, ".txt", configs);
 
   if (argc < 2) {
     printf("Usage : %s PATH [PATH ...]\n", argv[0]);
     exit (EXIT_FAILURE);
   }
 
-  printf("Press Ctrl+C to terminate.\n");
-
-  fd = inotify_init1(IN_CLOEXEC | IN_NONBLOCK);
-  if (fd == -1) {
-    perror("inotify_init1");
+  AppCtx app = {0};
+  if (app_setup(&app, argc, argv) != 0) {
+    perror("app_setup");
+    app_destoy(&app);
     exit(EXIT_FAILURE);
   }
 
-  wd = calloc(argc, sizeof(int));
-
-  if (wd == NULL) {
-    perror("calloc");
-    exit(EXIT_FAILURE);
-  }
-
-  for (i = 1; i < argc; i++) {
-    wd[i] = inotify_add_watch(fd, argv[1], IN_CLOSE_WRITE | IN_MOVED_TO);
-
-    if (wd[i] == -1) {
-      fprintf(stderr, "Cannot watch '%s': %s\n", argv[i], strerror(errno));
-      exit(EXIT_FAILURE);
-    }
-  }
-
-  nfds = 2;
+  nfds_t nfds = 2;
   fds[0].fd = signal_setup(); // signal input
   fds[0].events = POLLIN;
 
-  fds[1].fd = fd; // inotify input
+  fds[1].fd = app.handles.inotify_fd; // inotify input
   fds[1].events = POLLIN;
 
+  printf("Press Ctrl+C to terminate.\n");
   printf("Listening for events.\n");
 
+  int poll_num;
   while (1) {
     poll_num = poll(fds, nfds, -1);
     if (poll_num == -1) {
@@ -188,13 +129,11 @@ int main(int argc, char *argv[]) {
         else continue;
       }
 
-      if (fds[1].revents & POLLIN) events_handle(dict, fd, wd, argc, argv);
+      if (fds[1].revents & POLLIN) events_handle(&app, argc, argv);
     }
   }
 
   printf("Listening for events stopped.\n");
-  close(fd);
-  free(wd);
-  dict_free(dict, kvp_dir_free);
+  app_destoy(&app);
   exit(EXIT_SUCCESS);
 }

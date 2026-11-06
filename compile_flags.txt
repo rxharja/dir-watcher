@@ -1,3 +1,4 @@
 -xc
 -std=gnu17
 -Iinclude
+-D_GNU_SOURCE
