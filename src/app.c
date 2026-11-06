@@ -1,3 +1,4 @@
+#include "dictionary.h"
 #include "file.h"
 #include <assert.h>
 #include <errno.h>
@@ -28,6 +29,7 @@ void app_destoy(AppCtx *app) {
 // +1 so index 0 doesn't encode to NULL (dict_find's "absent" value)
 #define IDX_TO_VAL(i) ((void *)(uintptr_t)((i) + 1))
 #define VAL_TO_IDX(v) ((size_t)(uintptr_t)(v) - 1)
+#define RULE_EXCLUDE ((void *)UINTPTR_MAX)
 
 int app_rules_build(Rules *out, int argc, char **argv) {
   assert(out);
@@ -63,6 +65,9 @@ int app_rules_build(Rules *out, int argc, char **argv) {
   for (size_t i = 0; i < out->watch_path_count; i++) {
     if (!realpath(argv[i+1], out->watch_paths[i].s) && errno != ENOENT) goto fail;
   }
+
+  // test dict_insert for exclusion
+  dict_insert(out->by_ext, ".part", RULE_EXCLUDE);
 
   return 0;
 
@@ -158,6 +163,7 @@ int file_move_handle(const AppCtx *app, DirHandle *origin, const char *target_pa
   }
 
   void *v = dict_find(app->rules.by_ext, base_name.ext);
+  if (v == RULE_EXCLUDE) return 0;
   size_t idx = v ? VAL_TO_IDX(v) : app->rules.fallback_idx;
 
   return file_move(origin, &app->handles.dirs[idx], &base_name);
