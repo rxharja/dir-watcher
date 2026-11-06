@@ -28,6 +28,11 @@ typedef struct {
 
 typedef struct { Rules rules; Handles handles; } AppCtx;
 
+// +1 so index 0 doesn't encode to NULL (dict_find's "absent" value)
+#define IDX_TO_VAL(i) ((void *)(uintptr_t)((i) + 1))
+#define VAL_TO_IDX(v) ((size_t)(uintptr_t)(v) - 1)
+#define RULE_EXCLUDE ((void *)UINTPTR_MAX)
+
 int app_rules_build(Rules *out, int argc, char **argv);
 
 void app_rules_deinit(Rules *r);
