@@ -45,6 +45,6 @@ int app_setup(AppCtx *app, int argc, char **argv);
 
 void app_destoy(AppCtx *app);
 
-int file_move_handle(const AppCtx *app, DirHandle *origin, const char *target_path);
+int file_move_handle(const AppCtx *app, WatchDirHandle *origin, const char *target_path);
 
 #endif

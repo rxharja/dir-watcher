@@ -1,4 +1,3 @@
-#include <errno.h>
 #include <linux/limits.h>
 #include <poll.h>
 #include <signal.h>
@@ -50,7 +49,7 @@ static void events_handle(AppCtx *app, int argc, char *argv[]) {
       if (event->mask & (IN_CLOSE_WRITE | IN_MOVED_TO)) {
         for (int i = 0; i < argc; ++i) {
           if (app->handles.watched[i].wd == event->wd && event->len) {
-            file_move_handle(app, &app->handles.watched[i].dir, event->name);
+            file_move_handle(app, &app->handles.watched[i], event->name);
             break;
           }
         }

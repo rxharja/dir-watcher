@@ -145,7 +145,7 @@ void app_handles_close(Handles *h) {
   free(h->dirs);
 }
 
-int file_move_handle(const AppCtx *app, DirHandle *origin, const char *target_path) {
+int file_move_handle(const AppCtx *app, WatchedDirHandle *origin, const char *target_path) {
   assert(app);
   assert(origin);
   assert(target_path);
@@ -161,5 +161,5 @@ int file_move_handle(const AppCtx *app, DirHandle *origin, const char *target_pa
   if (v == RULE_EXCLUDE) return 0;
   size_t idx = v ? VAL_TO_IDX(v) : app->rules.fallback_idx;
 
-  return file_move(origin, &app->handles.dirs[idx], &base_name);
+  return file_move(&origin->dir, &app->handles.dirs[idx], &base_name);
 }
