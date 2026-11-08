@@ -13,6 +13,8 @@
 
 int app_setup(AppCtx *app, int argc, char **argv) {
   assert(app);
+  assert(argv);
+  assert(argc > 1);
 
   if (app_rules_build(&app->rules, argc, argv) != 0) return -1;
   if (app_handles_open(&app->rules, &app->handles) != 0) return 1;
@@ -43,7 +45,8 @@ int app_rules_build(Rules *out, int argc, char **argv) {
 
   // default
   out->fallback_idx = 0;
-  out->dir_paths[out->fallback_idx] = (CanonicalPath){ .s = "/home/redonxharja/projects/dir-watcher/output" };
+  out->dir_paths[out->fallback_idx] = 
+    (CanonicalPath){ .s = "/home/redonxharja/projects/dir-watcher/output" };
 
   // todo: normalize dirs properly here
   char *exts[4] = {"", ".pdf", ".zip", ".txt" };
@@ -51,7 +54,7 @@ int app_rules_build(Rules *out, int argc, char **argv) {
   
   for (size_t i = 1; i < out->dir_count; i++) {
     // convert relative to absolute, ENOENT is not handled here
-    if (!realpath(dirs[i], out->dir_paths[i].s) && errno != ENOENT) goto fail;
+    if (!file_normalize(dirs[i], out->dir_paths[i].s) && errno != ENOENT) goto fail;
     if(dict_insert(out->by_ext, exts[i], IDX_TO_VAL(i)) != 1) goto fail;
   }
 

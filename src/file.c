@@ -38,7 +38,10 @@ static int file_write_path_to_buf(const char *part1, const char *part2, char* ou
   assert(part2);
   assert(out);
 
-  int n = snprintf(out, PATH_MAX, "%s/%s", part1, part2);
+  size_t part1_len = strlen(part1);
+  const char *sep = (part1_len >  0 && part1[part1_len -1] == '/') ? "" : "/";
+
+  int n = snprintf(out, PATH_MAX, "%s%s%s", part1, sep, part2);
 
   if (n < 0) return -1;
 
@@ -55,11 +58,18 @@ static int file_tilde_expand(const char *dir_path, char *out) {
   assert(dir_path);
   assert(dir_path[0] == '~');
 
-  if (dir_path[1] != '/') return -1;
+  // assert the path starts with ~/ otherwise it's malformed
+  if (dir_path[1] != '/') {
+    fprintf(stderr, "Incorrectly formatted path for %s", dir_path);
+    return -1;
+  }
+
+  // skip ~ so that we can join them properly
+  const char *rest_of_path_ptr = dir_path + 1; 
 
   const char *home_dir = getenv("HOME");
   if (home_dir != NULL && home_dir[0] != '\0') {
-    return file_write_path_to_buf(home_dir, dir_path + 1, out);
+    return file_write_path_to_buf(home_dir, rest_of_path_ptr, out);
   }
 
   struct passwd *pw = getpwuid(getuid());
@@ -70,16 +80,25 @@ static int file_tilde_expand(const char *dir_path, char *out) {
 }
 
 static int file_relative_expand(const char *dir_path, char *out) {
-  char real_path[PATH_MAX];
+  assert(dir_path);
+  assert(out);
 
-  if (realpath(dir_path, real_path) == NULL && errno != ENOENT) {
-    perror("realpath");
+  // assuming we can supply our config, it should replace the start of the path
+  //
+  // check for relative with ./
+  // check for relative with no ./
+
+  // assert the path does not start with / 
+  if (dir_path[1] != '/') {
+    fprintf(stderr, "Incorrectly formatted path for %s", dir_path);
     return -1;
   }
 
-  // const char *rel_dir_path = dir_path[0] == '.' ? dir_path + 1 : dir_path;
+  // todo: temp relative path
+  static char relative_path[] = "/home/redonxharja/tmp";
 
-  if (file_write_path_to_buf(real_path, "", out) != 0) {
+  // const char *rel_dir_path = dir_path[0] == '.' ? dir_path + 1 : dir_path;
+  if (file_write_path_to_buf(relative_path, dir_path, out) != 0) {
     printf("Cannot expand relative path for %s.\n", dir_path);
     return -1;
   }
@@ -92,19 +111,27 @@ int file_normalize(const char *dir_path, char *out) {
   const char *path_ptr = dir_path;
 
   if(dir_path[0] == '\0') {
-    printf("The supplied directory was empty.\n");
+    perror("The supplied directory was empty.\n");
     return -1;
   }
 
   if (dir_path[0] == '~' && file_tilde_expand(path_ptr, out) < 0) {
-    printf("Cannot expand '~' for path %s.\n", dir_path);
+    fprintf(stderr, "Cannot expand '~' for path %s.\n", dir_path); 
     return -1;
   }
-  else if (dir_path[0] == '.' || dir_path[0] != '/') {
-    return file_relative_expand(dir_path, out);
+
+  if (dir_path[0] == '.' || dir_path[0] != '/') {
+    if (file_relative_expand(dir_path, out) != 0) {
+      fprintf(stderr, "Cannot expand relative path for path %s.\n", dir_path); 
+      return -1;
+    }
   }
 
-  dirname(out);
+  // dir creation is handled downstream so it is safe to egnore ENOENT
+  if (realpath(out, out) == NULL && errno != ENOENT) {
+    perror("realpath");
+    return -1;
+  }
 
   return 0;
 }
@@ -114,8 +141,7 @@ int file_dir_create(const CanonicalPath *dir_path) {
   assert(dir_path);
 
   char path_to_create[PATH_MAX];
-  // todo: actually handle the length provided by the dir_path
-  snprintf(path_to_create, PATH_MAX - 1, "%s/", dir_path->s);
+  sprintf(path_to_create, "%s", dir_path->s);
 
   char *slash = strchr(path_to_create + 1, '/');
 
@@ -130,6 +156,11 @@ int file_dir_create(const CanonicalPath *dir_path) {
     }
 
     slash = strchr(slash + 1, '/');
+  }
+
+  if (mkdir(path_to_create, 0755) != 0 && errno != EEXIST) {
+    perror("mkdir");
+    return -1;
   }
 
   return 0;

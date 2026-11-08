@@ -8,6 +8,7 @@
 #include <libgen.h>
 #include "file.h"
 #include <sys/signalfd.h>
+#include <errno.h>
 #include "app.h"
 
 static void events_handle(AppCtx *app, int argc, char *argv[]) {
@@ -80,10 +81,6 @@ ssize_t signal_setup() {
 }
 
 int main(int argc, char *argv[]) {
-  struct signalfd_siginfo fdsi;
-  ssize_t signal_size;
-  struct pollfd fds[2];
-
   if (argc < 2) {
     printf("Usage : %s PATH [PATH ...]\n", argv[0]);
     exit (EXIT_FAILURE);
@@ -96,7 +93,12 @@ int main(int argc, char *argv[]) {
     exit(EXIT_FAILURE);
   }
 
+  struct signalfd_siginfo fdsi;
+  ssize_t signal_size;
+
   nfds_t nfds = 2;
+  struct pollfd fds[2];
+
   fds[0].fd = signal_setup(); // signal input
   fds[0].events = POLLIN;
 

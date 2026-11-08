@@ -6,6 +6,7 @@
 #include <stddef.h>
 #include <sys/types.h>
 
+// ensures the path is absolute 
 typedef struct { char s[PATH_MAX]; } CanonicalPath;
 
 typedef struct { int fd; dev_t st_dev; } DirHandle;
