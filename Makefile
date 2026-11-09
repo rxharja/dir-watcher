@@ -31,4 +31,4 @@ clean:
 
 .PHONY: clean
 
--include $(DEPS
+-include $(DEPS)
