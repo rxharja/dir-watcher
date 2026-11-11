@@ -1,35 +1,36 @@
 CC := gcc
-CFLAGS := -std=gnu17 -Wall -Wextra -g 
+CFLAGS := -std=gnu99 -Wall -Wextra -g 
+DEPFLAGS := -MMD -MP 
+CPPFLAGS := -Iinclude -isystem vendor/tomlc17/src -D_GNU_SOURCE
 
 SRCS := $(wildcard src/*.c)
 OBJS := $(SRCS:src/%.c=build/%.o)
 
-VENDOR_DIR := vendor
-VENDORS := $(VENDOR_DIR)/*
-TOML_DIR := $(VENDOR_DIR)/tomlc17/src
-VENDOR_SRCS := $(TOML_DIR)/tomlc17.c
-VENDOR_OBJS := $(VENDOR_SRCS:$(VENDOR_DIR)/%.c=build/vendor/%.o)
-VENDOR_CFLAGS := -std=c17 -g
-CPPFLAGS += -isystem $(TOML_DIR)
+DEPS := $(OBJS:.o=.d)
 
-CPPFLAGS := -Iinclude -isystem $(TOML_DIR) -D_GNU_SOURCE
-DEPFLAGS := -MMD -MP 
-DEPS := $(OBJS:.o=.d) $(VENDOR_OBJS:.o=.d)
+VENDOR_CFLAGS := -std=c17 -g
+VENDOR_SRCS := $(wildcard vendor/tomlc17/src/*.c)
+VENDOR_OBJS := $(VENDOR_SRCS:vendor/%.c=build/vendor/%.o)
+VENDOR_DEPS := $(VENDOR_OBJS:.o=.d)
 
 dir-watcher: $(OBJS) $(VENDOR_OBJS)
-	$(CC) $(CFLAGS) $^ -o $@
+	$(CC) $(CFLAGS) -o $@ $^
 
-build/%.o: src/%.c
+build/%.o: src/%.c 
 	@mkdir -p $(@D)
-	$(CC) $(CPPFLAGS) $(CFLAGS) -c $< -o $@
+	$(CC) $(CPPFLAGS) $(DEPFLAGS) $(CFLAGS) -o $@ -c $<
 
-build/vendor/%.o: $(VENDOR_DIR)/%.c 
+build/vendor/%.o: vendor/%.c 
 	@mkdir -p $(@D)
-	$(CC) $(DEPFLAGS) $(VENDOR_CFLAGS) -c $< -o $@
+	$(CC) $(DEPFLAGS) $(VENDOR_CFLAGS) -o $@ -c $<
+
+# if I ever have to change the tomlc17 header and have its
+# updates be caught by make
+$(OBJS): $(wildcard vendor/tomlc17/src/*.h)
 
 clean:
 	rm -rf build dir-watcher
 
 .PHONY: clean
 
--include $(DEPS)
+-include $(DEPS) $(VENDOR_DEPS)
