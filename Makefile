@@ -1,5 +1,4 @@
 CC := gcc
-CPPFLAGS := -Iinclude -MMD -MP -D_GNU_SOURCE
 CFLAGS := -std=gnu17 -Wall -Wextra -g 
 
 SRCS := $(wildcard src/*.c)
@@ -13,6 +12,8 @@ VENDOR_OBJS := $(VENDOR_SRCS:$(VENDOR_DIR)/%.c=build/vendor/%.o)
 VENDOR_CFLAGS := -std=c17 -g
 CPPFLAGS += -isystem $(TOML_DIR)
 
+CPPFLAGS := -Iinclude -isystem $(TOML_DIR) -D_GNU_SOURCE
+DEPFLAGS := -MMD -MP 
 DEPS := $(OBJS:.o=.d) $(VENDOR_OBJS:.o=.d)
 
 dir-watcher: $(OBJS) $(VENDOR_OBJS)
@@ -24,7 +25,7 @@ build/%.o: src/%.c
 
 build/vendor/%.o: $(VENDOR_DIR)/%.c 
 	@mkdir -p $(@D)
-	$(CC) $(CPPFLAGS) $(VENDOR_CFLAGS) -c $< -o $@
+	$(CC) $(DEPFLAGS) $(VENDOR_CFLAGS) -c $< -o $@
 
 clean:
 	rm -rf build dir-watcher
