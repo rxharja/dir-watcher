@@ -54,7 +54,7 @@ int app_rules_build(Rules *out, int argc, char **argv) {
   
   for (size_t i = 1; i < out->dir_count; i++) {
     // convert relative to absolute, ENOENT is not handled here
-    if (!file_normalize(dirs[i], out->dir_paths[i].s) && errno != ENOENT) goto fail;
+    if (file_normalize(dirs[i], out->dir_paths[i].s) != 0 && errno != ENOENT) goto fail;
     if(dict_insert(out->by_ext, exts[i], IDX_TO_VAL(i)) != 1) goto fail;
   }
 
