@@ -1,4 +1,6 @@
 -xc
 -std=gnu17
 -Iinclude
+-isystem
+vendor/tomlc17/src
 -D_GNU_SOURCE

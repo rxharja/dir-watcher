@@ -10,12 +10,14 @@
 #include <unistd.h>
 #include <stdint.h>
 #include "app.h"
+#include "config.h"
 
 int app_setup(AppCtx *app, int argc, char **argv) {
   assert(app);
   assert(argv);
   assert(argc > 1);
 
+  config_read();
   if (app_rules_build(&app->rules, argc, argv) != 0) return -1;
   if (app_handles_open(&app->rules, &app->handles) != 0) return 1;
 

@@ -1,13 +1,19 @@
 version = 1
 
+[defaults]
+on_conflict = "rename" # rename | skip | overwrite
+dry_run = false
+
 [watch]
 path="~/Downloads"
 ignore = ["*.part", "*.crdownload", ".*"]
 settle_seconds = 2
 
-on_conflict = "rename" # rename | skip | overwrite
-[defaults]
-dry_run = false
+[[dest]]
+path="~/notes"
+extensions=[".txt", ".md"]
 
-[[rules]]
+[[dest]]
+path="~/archives"
+extensions=[".tar", ".tar.gz", ".zip"]
 
