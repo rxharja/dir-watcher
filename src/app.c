@@ -12,18 +12,28 @@
 #include <stdint.h>
 #include "app.h"
 
+static void error_show(config_error_t config_err) {
+  if (config_err.kind != CONFIG_OK) {
+    if (config_err.sys_errno != 0) {
+      fprintf(stderr, 
+          "An system error occurred while parsing the config: %s",
+          strerror(config_err.sys_errno));
+    }
+    else {
+      fprintf(stderr, 
+          "An error happened while parsing the config: %s",
+          rules_config_strerror(config_err.kind));
+    }
+  }
+}
+
 int app_setup(AppCtx *app) {
   assert(app);
 
-  config_err_t config_err;
-  config_err = rules_build(&app->rules, "examples/config.toml"); 
-
-  if (config_err != CONFIG_OK) {
-    fprintf(stderr, 
-        "An error happened while parsing the config: %s",
-        rules_config_strerror(config_err));
-
+  config_error_t config_err = rules_build(&app->rules, "examples/config.toml"); 
+  if (config_err.kind != CONFIG_OK) {
     return -1;
+    error_show(config_err);
   }
 
   if (app_handles_open(&app->rules, &app->handles) != 0) return 1;

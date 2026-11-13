@@ -6,6 +6,7 @@
 #define DIR_WATCHER_RULES_H
 #include "dictionary.h"
 #include "file.h"
+#include <tomlc17.h>
 
 // +1 so index 0 doesn't encode to NULL (dict_find's "absent" value)
 #define IDX_TO_VAL(i) ((void *)(uintptr_t)((i) + 1))
@@ -19,7 +20,7 @@
 #define CONFIG_WATCH_IGNORE "watch.ignore"
 #define CONFIG_WATCH_SETTLE_SECONDS "watch.settle_seconds"
 #define CONFIG_DEST_PATH "dest.path"
-#define CONFIG_DEST_EXTENSIONS "dest.extensions"
+#define CONFIG_DEST_EXTENSIONS "extensions"
 #define CONFIG_WATCH_TABLE "watch"
 #define CONFIG_DEST_TABLE "dest"
 
@@ -37,15 +38,24 @@ typedef struct {
 } Rules;
 
 typedef enum {
+  CONFIG_NOT_PROCESSED = -1,
   CONFIG_OK = 0,
   CONFIG_MISSING,
   CONFIG_WRONG_TYPE
-} config_err_t;
+} config_parse_err;
 
-int rules_build(Rules *out, const char *config_path);
+typedef struct {
+  config_parse_err kind;
+  int sys_errno;
+  const char *key;
+} config_error_t;
+
+config_error_t rules_build(Rules *out, const char *config_path);
 
 void rules_deinit(Rules *out);
 
-const char* rules_config_strerror(config_err_t err);
+const char* rules_config_strerror(config_parse_err err);
 
+
+static config_error_t rules_watch_build(Rules *out, const toml_result_t *result);
 #endif //DIR_WATCHER_RULES_H
