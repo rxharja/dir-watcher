@@ -20,6 +20,8 @@
 #define CONFIG_WATCH_SETTLE_SECONDS "watch.settle_seconds"
 #define CONFIG_DEST_PATH "dest.path"
 #define CONFIG_DEST_EXTENSIONS "dest.extensions"
+#define CONFIG_WATCH_TABLE "watch"
+#define CONFIG_DEST_TABLE "dest"
 
 typedef struct {
     Dictionary *by_name;
@@ -34,8 +36,16 @@ typedef struct {
     size_t fallback_idx;
 } Rules;
 
+typedef enum {
+  CONFIG_OK = 0,
+  CONFIG_MISSING,
+  CONFIG_WRONG_TYPE
+} config_err_t;
+
 int rules_build(Rules *out, const char *config_path);
 
 void rules_deinit(Rules *out);
+
+const char* rules_config_strerror(config_err_t err);
 
 #endif //DIR_WATCHER_RULES_H

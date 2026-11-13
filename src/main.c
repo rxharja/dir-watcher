@@ -87,7 +87,7 @@ int main(int argc, char *argv[]) {
   }
 
   AppCtx app = {0};
-  if (app_setup(&app, argc, argv) != 0) {
+  if (app_setup(&app) != 0) {
     perror("app_setup");
     app_destroy(&app);
     exit(EXIT_FAILURE);

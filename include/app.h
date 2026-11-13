@@ -24,7 +24,7 @@ int app_handles_open(const Rules* rules, Handles *out);
 
 void app_handles_close(Handles *h);
 
-int app_setup(AppCtx *app, int argc, char **argv);
+int app_setup(AppCtx *app);
 
 void app_destroy(AppCtx *app);
 

@@ -1,5 +1,6 @@
 #include "dictionary.h"
 #include "file.h"
+#include "rules.h"
 #include <assert.h>
 #include <errno.h>
 #include <stddef.h>
@@ -10,14 +11,21 @@
 #include <unistd.h>
 #include <stdint.h>
 #include "app.h"
-#include "config.h"
 
-int app_setup(AppCtx *app, int argc, char **argv) {
+int app_setup(AppCtx *app) {
   assert(app);
-  assert(argv);
-  assert(argc > 1);
 
-  if (rules_build(&app->rules, "examples/config.toml") != 0) return -1;
+  config_err_t config_err;
+  config_err = rules_build(&app->rules, "examples/config.toml"); 
+
+  if (config_err != CONFIG_OK) {
+    fprintf(stderr, 
+        "An error happened while parsing the config: %s",
+        rules_config_strerror(config_err));
+
+    return -1;
+  }
+
   if (app_handles_open(&app->rules, &app->handles) != 0) return 1;
 
   return 0;
