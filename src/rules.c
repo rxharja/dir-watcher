@@ -20,7 +20,6 @@ static config_error_t err_init() {
   };
 }
 
-
 static int rules_dict_insert(const Rules *rules, const char *key, const void *idx) {
     assert(rules);
     assert(rules->by_ext);
@@ -123,8 +122,8 @@ static config_error_t rules_dest_build(Rules *out, const toml_result_t *result) 
       goto fail;
     }
 
-    out->fallback_idx = 0;
-    if (snprintf(out->dir_paths[out->fallback_idx].s, PATH_MAX, "%s", default_path.u.s) == -1) {
+    out->fallback_idx = RULES_FALLBACK_IDX;
+    if (snprintf(out->dir_paths[RULES_FALLBACK_IDX].s, PATH_MAX, "%s", default_path.u.s) == -1) {
       err.sys_errno = errno;
       goto fail;
     }
