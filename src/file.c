@@ -115,17 +115,19 @@ int file_normalize(const char *dir_path, char *out) {
     return -1;
   }
 
-  if (dir_path[0] == '~' && file_tilde_expand(path_ptr, out) < 0) {
-    fprintf(stderr, "Cannot expand '~' for path %s.\n", dir_path); 
-    return -1;
-  }
-
-  if (dir_path[0] == '.' || dir_path[0] != '/') {
-    if (file_relative_expand(dir_path, out) != 0) {
-      fprintf(stderr, "Cannot expand relative path for path %s.\n", dir_path); 
+  if (dir_path[0] == '~') {
+    if (file_tilde_expand(path_ptr, out) < 0) {
+      fprintf(stderr, "Cannot expand '~' for path %s.\n", dir_path);
       return -1;
     }
   }
+  else if (dir_path[0] == '.' || dir_path[0] != '/') {
+      if (file_relative_expand(dir_path, out) != 0) {
+        fprintf(stderr, "Cannot expand relative path for path %s.\n", dir_path);
+        return -1;
+      }
+  }
+
 
   // dir creation is handled downstream so it is safe to egnore ENOENT
   if (realpath(out, out) == NULL && errno != ENOENT) {

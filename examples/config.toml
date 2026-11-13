@@ -2,9 +2,10 @@ version = 1
 
 [defaults]
 on_conflict = "rename" # rename | skip | overwrite
+dest_path = "~/projects/dir-watcher/output"
 dry_run = false
 
-[watch]
+[[watch]]
 path="~/Downloads"
 ignore = ["*.part", "*.crdownload", ".*"]
 settle_seconds = 2

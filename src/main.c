@@ -89,7 +89,7 @@ int main(int argc, char *argv[]) {
   AppCtx app = {0};
   if (app_setup(&app, argc, argv) != 0) {
     perror("app_setup");
-    app_destoy(&app);
+    app_destroy(&app);
     exit(EXIT_FAILURE);
   }
 
@@ -135,6 +135,6 @@ int main(int argc, char *argv[]) {
   }
 
   printf("Listening for events stopped.\n");
-  app_destoy(&app);
+  app_destroy(&app);
   exit(EXIT_SUCCESS);
 }

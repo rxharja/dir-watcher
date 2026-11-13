@@ -17,79 +17,19 @@ int app_setup(AppCtx *app, int argc, char **argv) {
   assert(argv);
   assert(argc > 1);
 
-  config_read();
-  if (app_rules_build(&app->rules, argc, argv) != 0) return -1;
+  if (rules_build(&app->rules, "examples/config.toml") != 0) return -1;
   if (app_handles_open(&app->rules, &app->handles) != 0) return 1;
 
   return 0;
 }
 
-void app_destoy(AppCtx *app) {
+void app_destroy(AppCtx *app) {
   if (!app) return;
-  app_rules_deinit(&app->rules);
+  rules_deinit(&app->rules);
   app_handles_close(&app->handles);
 }
 
-int app_rules_build(Rules *out, int argc, char **argv) {
-  assert(out);
-
-  // 3 test dirs and 1 default
-  out->dir_count = 3 + 1;
-  out->dir_paths = calloc(out->dir_count, sizeof(CanonicalPath));
-  if(!out->dir_paths) goto fail;
-
-  out->watch_path_count = 1;
-  out->watch_paths = calloc(out->watch_path_count, sizeof(CanonicalPath));
-  if(!out->watch_paths) goto fail;
-
-  out->by_ext = dict_init();
-  if (!out->by_ext) goto fail;
-
-  // default
-  out->fallback_idx = 0;
-  out->dir_paths[out->fallback_idx] = 
-    (CanonicalPath){ .s = "/home/redonxharja/projects/dir-watcher/output" };
-
-  // todo: normalize dirs properly here
-  char *exts[4] = {"", ".pdf", ".zip", ".txt" };
-  char *dirs[4] = {"", "./pdfs", "./zips", "./configs" };
-  
-  for (size_t i = 1; i < out->dir_count; i++) {
-    // convert relative to absolute, ENOENT is not handled here
-    if (file_normalize(dirs[i], out->dir_paths[i].s) != 0 && errno != ENOENT) goto fail;
-    if(dict_insert(out->by_ext, exts[i], IDX_TO_VAL(i)) != 1) goto fail;
-  }
-
-  // set up watch paths
-  out->watch_path_count = argc - 1;
-  for (size_t i = 0; i < out->watch_path_count; i++) {
-    if (!realpath(argv[i+1], out->watch_paths[i].s) && errno != ENOENT) goto fail;
-  }
-
-  // test dict_insert for exclusion
-  dict_insert(out->by_ext, ".part", RULE_EXCLUDE);
-
-  return 0;
-
-fail:
-  app_rules_deinit(out);
-  return -1;
-}
-
-void kvp_key_free(void *p) {
-  Kvp *kvp = p;
-  free((void*)kvp->key); 
-}
-
-void app_rules_deinit(Rules *out) {
-  if (!out) return;
-  free(out->dir_paths);
-  free(out->watch_paths);
-  if(out->by_ext) dict_free(out->by_ext, kvp_key_free);
-}
-
-
-int app_file_setup(CanonicalPath *path, int *fd, dev_t *st_dev) {
+static int app_file_setup(CanonicalPath *path, int *fd, dev_t *st_dev) {
   if (file_dir_create(path) != 0) return -1;
   if (file_dir_open(path, fd) != 0) return -1;
   if (file_dir_stat(*fd, st_dev) != 0) return -1;

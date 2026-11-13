@@ -13,6 +13,8 @@ VENDOR_SRCS := $(wildcard vendor/tomlc17/src/*.c)
 VENDOR_OBJS := $(VENDOR_SRCS:vendor/%.c=build/vendor/%.o)
 VENDOR_DEPS := $(VENDOR_OBJS:.o=.d)
 
+all: dir-watcher
+
 dir-watcher: $(OBJS) $(VENDOR_OBJS)
 	$(CC) $(CFLAGS) -o $@ $^
 
@@ -31,6 +33,6 @@ $(OBJS): $(wildcard vendor/tomlc17/src/*.h)
 clean:
 	rm -rf build dir-watcher
 
-.PHONY: clean
+.PHONY: all clean
 
 -include $(DEPS) $(VENDOR_DEPS)
