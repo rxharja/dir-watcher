@@ -137,7 +137,7 @@ static config_error_t rules_dest_build(Rules *out, const toml_result_t *result) 
         err = config_get(dest_table, "path", TOML_STRING, &config_dest_path);
         if (err.kind != CONFIG_OK) goto fail;
 
-        if (file_normalize(config_dest_path.u.s, out->dir_paths[i].s) != 0 && errno != ENOENT) goto fail;
+        if (file_normalize(config_dest_path.u.s, out->dir_paths[i + 1].s) != 0 && errno != ENOENT) goto fail;
 
         toml_datum_t config_dest_targets;
         err = config_get(dest_table, CONFIG_DEST_EXTENSIONS, TOML_ARRAY, &config_dest_targets);
@@ -147,7 +147,7 @@ static config_error_t rules_dest_build(Rules *out, const toml_result_t *result) 
             const toml_datum_t targets = config_dest_targets.u.arr.elem[j];
             err = config_type_check(targets.type, TOML_STRING, CONFIG_DEST_EXTENSIONS);
             if (err.kind != CONFIG_OK) goto fail;
-            if(rules_dict_insert(out, targets.u.s, IDX_TO_VAL(i + 1)) != 1) {
+            if(rules_dict_insert(out, targets.u.s, IDX_TO_VAL(i)) != 1) {
               err.sys_errno = errno;
               goto fail;
             }
