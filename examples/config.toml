@@ -7,7 +7,7 @@ dry_run = false
 
 [[watch]]
 path="~/Downloads"
-ignore = ["*.part", "*.crdownload", ".*"]
+ignore = [".part", ".crdownload"]
 settle_seconds = 2
 
 [[dest]]

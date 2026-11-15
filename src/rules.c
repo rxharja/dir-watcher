@@ -26,6 +26,7 @@ static int rules_dict_insert(const Rules *rules, const char *key, const void *id
     assert(rules->by_name);
     assert(key);
 
+    // todo: handle collision: if user says one filetype has two destinations
     if (key[0] == '.') return dict_insert(rules->by_ext, key, IDX_TO_VAL(idx));
     return dict_insert(rules->by_name, key, IDX_TO_VAL(idx));
 }

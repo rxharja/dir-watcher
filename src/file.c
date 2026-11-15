@@ -203,7 +203,7 @@ int file_basename_build(const char * fpath, BaseName *b) {
 
   b->name = fpath;
 
-  const char *dot = strrchr(b->name, '.');
+  const char *dot = strchr(b->name, '.');
   if (dot) b->ext  = dot;
   if (dot == b->name) return -1;
 

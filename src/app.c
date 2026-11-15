@@ -121,8 +121,9 @@ int file_move_handle(const AppCtx *app, WatchedDirHandle *origin, const char *ta
   }
 
   void *v = dict_find(app->rules.by_ext, base_name.ext);
+  if (!v) v = dict_find(app->rules.by_name, base_name.ext);
   if (v == RULE_EXCLUDE) return 0;
-  size_t idx = v ? VAL_TO_IDX(v) : app->rules.fallback_idx;
+  const size_t idx = v ? VAL_TO_IDX(v) : app->rules.fallback_idx;
 
   return file_move(&origin->dir, &app->handles.dirs[idx], &base_name);
 }
