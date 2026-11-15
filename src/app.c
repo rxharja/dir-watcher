@@ -12,7 +12,7 @@
 #include <stdint.h>
 #include "app.h"
 
-static void error_show(config_error_t config_err) {
+static void error_show(const config_error_t config_err) {
   if (config_err.kind != CONFIG_OK) {
     if (config_err.sys_errno != 0) {
       fprintf(stderr, 
@@ -47,7 +47,7 @@ void app_destroy(AppCtx *app) {
   app_handles_close(&app->handles);
 }
 
-static int app_file_setup(CanonicalPath *path, int *fd, dev_t *st_dev) {
+static int app_file_setup(const CanonicalPath *path, int *fd, dev_t *st_dev) {
   if (file_dir_create(path) != 0) return -1;
   if (file_dir_open(path, fd) != 0) return -1;
   if (file_dir_stat(*fd, st_dev) != 0) return -1;
@@ -91,7 +91,7 @@ fail:
   return -1;
 }
 
-void app_handles_close(Handles *h) {
+void app_handles_close(const Handles *h) {
   for (size_t i = 0; i < h->watched_count; i++) {
     close(h->watched[i].wd);
     close(h->watched[i].dir.fd);
@@ -108,7 +108,7 @@ void app_handles_close(Handles *h) {
   free(h->dirs);
 }
 
-int file_move_handle(const AppCtx *app, WatchedDirHandle *origin, const char *target_path) {
+int file_move_handle(const AppCtx *app, const WatchedDirHandle *origin, const char *target_path) {
   assert(app);
   assert(origin);
   assert(target_path);

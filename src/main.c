@@ -11,7 +11,7 @@
 #include <errno.h>
 #include "app.h"
 
-static void events_handle(AppCtx *app, int argc, char *argv[]) {
+static void events_handle(const AppCtx *app, const int argc, char *argv[]) {
   char buf[sizeof(struct inotify_event) + NAME_MAX + 1] __attribute__((aligned(__alignof__(struct inotify_event))));
 
   const struct inotify_event *event; 
@@ -80,7 +80,7 @@ ssize_t signal_setup() {
   return sig_fd;
 }
 
-int main(int argc, char *argv[]) {
+int main(const int argc, char *argv[]) {
   if (argc < 2) {
     printf("Usage : %s PATH [PATH ...]\n", argv[0]);
     exit (EXIT_FAILURE);

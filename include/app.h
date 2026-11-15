@@ -22,12 +22,12 @@ typedef struct {
 
 int app_handles_open(const Rules* rules, Handles *out);
 
-void app_handles_close(Handles *h);
+void app_handles_close(const Handles *h);
 
 int app_setup(AppCtx *app);
 
 void app_destroy(AppCtx *app);
 
-int file_move_handle(const AppCtx *app, WatchedDirHandle *origin, const char *target_path);
+int file_move_handle(const AppCtx *app, const WatchedDirHandle *origin, const char *target_path);
 
 #endif

@@ -14,7 +14,7 @@
 #include <sys/stat.h>
 #include <pwd.h>
 
-void file_err_show(int errsv, const char * dir_path) {
+void file_err_show(const int errsv, const char * dir_path) {
   switch (errsv) {
     case ENOTDIR: // config mistake, dir isn't a dir
       printf("%s is not a directory.\n", dir_path);

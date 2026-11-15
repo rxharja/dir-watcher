@@ -38,7 +38,7 @@ static config_error_t config_type_check(const toml_type_t type, const toml_type_
   return (config_error_t){CONFIG_OK, 0, NULL};
 }
 
-static config_error_t config_get(const toml_datum_t datum, const char *key, toml_type_t expected, toml_datum_t *out) {
+static config_error_t config_get(const toml_datum_t datum, const char *key, const toml_type_t expected, toml_datum_t *out) {
   config_error_t err = err_init();
   const toml_datum_t d = toml_seek(datum, key);
   err = config_type_check(d.type, expected, key); 
@@ -47,7 +47,7 @@ static config_error_t config_get(const toml_datum_t datum, const char *key, toml
   return err;
 }
 
-const char* rules_config_strerror(config_parse_err err) {
+const char* rules_config_strerror(const config_parse_err err) {
   switch (err) {
     case CONFIG_OK:         return "ok";
     case CONFIG_MISSING:    return "missing";
