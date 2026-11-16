@@ -11,7 +11,7 @@
 #include <errno.h>
 #include "app.h"
 
-static void events_handle(const AppCtx *app, const int argc, char *argv[]) {
+static void events_handle(const AppCtx *app) {
   char buf[sizeof(struct inotify_event) + NAME_MAX + 1] __attribute__((aligned(__alignof__(struct inotify_event))));
 
   const struct inotify_event *event; 
@@ -34,9 +34,9 @@ static void events_handle(const AppCtx *app, const int argc, char *argv[]) {
       if (event->mask & IN_MOVED_TO) printf("IN_MOVED_TO: ");
     }
 
-    for (int i = 0; i < argc; ++i) {
+    for (int i = 0; i < app->rules.watch_path_count; ++i) {
       if (app->handles.watched[i].wd == event->wd) {
-        printf("%s/", argv[i + 1]);
+        printf("%s/", app->rules.watch_paths[i].s);
         break;
       }
     }
@@ -48,7 +48,7 @@ static void events_handle(const AppCtx *app, const int argc, char *argv[]) {
     for (char *ptr = buf; ptr < buf + size; ptr += sizeof(struct inotify_event) + event->len) {
       event = (const struct inotify_event*)ptr;
       if (event->mask & (IN_CLOSE_WRITE | IN_MOVED_TO)) {
-        for (int i = 0; i < argc; ++i) {
+        for (int i = 0; i < app->rules.watch_path_count; ++i) {
           if (app->handles.watched[i].wd == event->wd && event->len) {
             file_move_handle(app, &app->handles.watched[i], event->name);
             break;
@@ -80,18 +80,21 @@ ssize_t signal_setup() {
   return sig_fd;
 }
 
-int main(const int argc, char *argv[]) {
-  if (argc < 2) {
-    printf("Usage : %s PATH [PATH ...]\n", argv[0]);
-    exit (EXIT_FAILURE);
+void watched_dirs_show(AppCtx *app) {
+  for (int i = 0; i < app->rules.watch_path_count; i++) {
+    printf("Watching: %s/\n", app->rules.watch_paths[i].s);
   }
+}
 
+int main(void) {
   AppCtx app = {0};
   if (app_setup(&app) != 0) {
     perror("app_setup");
     app_destroy(&app);
     exit(EXIT_FAILURE);
   }
+
+  watched_dirs_show(&app);
 
   struct signalfd_siginfo fdsi;
   ssize_t signal_size;
@@ -130,7 +133,7 @@ int main(const int argc, char *argv[]) {
         else continue;
       }
 
-      if (fds[1].revents & POLLIN) events_handle(&app, argc, argv);
+      if (fds[1].revents & POLLIN) events_handle(&app);
     }
   }
 
