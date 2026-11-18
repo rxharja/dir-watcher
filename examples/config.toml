@@ -7,12 +7,12 @@ dry_run = false
 
 [[watch]]
 path="~/"
-ignore = ["*.part", "*.crdownload", "*.env"]
+# ignore = ["*.part", "*.crdownload", "*.env"]
 settle_seconds = 2
 
 [[watch]]
 path="~/Downloads"
-ignore = ["*.part", "*.crdownload"]
+# ignore = ["*.part", "*.crdownload"]
 settle_seconds = 2
 
 [[dest]]

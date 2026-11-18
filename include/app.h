@@ -28,7 +28,7 @@ int app_setup(AppCtx *app);
 
 void app_destroy(AppCtx *app);
 
-int app_file_move(const AppCtx *app, const WatchedDirHandle *origin, const char *target_path);
+int app_file_move(const AppCtx *app, const WatchedDirHandle *origin, const char *fname);
 
 void app_watched_dirs_show(const AppCtx *app);
 

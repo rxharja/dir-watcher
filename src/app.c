@@ -108,19 +108,14 @@ void app_handles_close(const Handles *h) {
   free(h->dirs);
 }
 
-int app_file_move(const AppCtx *app, const WatchedDirHandle *origin, const char *target_path) {
+int app_file_move(const AppCtx *app, const WatchedDirHandle *origin, const char *fname) {
   assert(app);
   assert(origin);
-  assert(target_path);
-  
-  BaseName base_name = {0};
-  if (file_basename_build(target_path, &base_name) != 0) {
-    perror("file_basename_build");
-    return -1;
-  }
+  assert(fname);
 
-  size_t idx = rules_set_path_find_idx(&app->rules, target_path);
-  return file_move(&origin->dir, &app->handles.dirs[idx], &base_name);
+  ssize_t idx = rules_set_path_find_idx(&app->rules, fname);
+  if (idx == CONFIG_IGNORE_IDX) return 0;
+  return file_move(&origin->dir, &app->handles.dirs[idx], fname);
 }
 
 void app_watched_dirs_show(const AppCtx *app) {

@@ -17,7 +17,6 @@ typedef struct {
 } Rule;
 
 typedef struct {
-  size_t fallback_idx;
   size_t dir_count;
   size_t watch_path_count;
   size_t rule_set_count;
@@ -45,7 +44,7 @@ config_error_t rules_build(Rules *out, const char *config_path);
 
 void rules_deinit(Rules *out);
 
-size_t rules_set_path_find_idx(const Rules *rules, const char *string);
+ssize_t rules_set_path_find_idx(const Rules *rules, const char *string);
 
 const char* rules_config_strerror(config_parse_err err);
 

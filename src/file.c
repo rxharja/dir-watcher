@@ -196,22 +196,10 @@ int file_dir_stat(const int dir_fd, dev_t *st_dev) {
   return 0;
 }
 
-// a
-int file_basename_build(const char * fpath, BaseName *b) {
-  assert(fpath);
-  assert(b);
 
-  b->name = fpath;
+int file_move(const DirHandle *origin, const DirHandle* destination, const char *fname) {
+  int res = renameat2(origin->fd, fname, destination->fd, fname, RENAME_NOREPLACE);
 
-  const char *dot = strchr(b->name, '.');
-  if (dot) b->ext  = dot;
-  if (dot == b->name) return -1;
-
-  return 0;
-}
-
-int file_move(const DirHandle *origin, const DirHandle* destination, const BaseName *bname) {
-  int res = renameat2(origin->fd, bname->name, destination->fd, bname->name, RENAME_NOREPLACE);
   if (res != 0) {
     perror("renameat2");
     return -1;

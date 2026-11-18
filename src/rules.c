@@ -49,24 +49,26 @@ const char* rules_config_strerror(const config_parse_err err) {
 static int rules_set_add(Rules *out, const char *match, ssize_t target_idx) {
   assert(out);
   assert(match);
-  size_t match_size = strlen(match);
 
-  out->rule_set[out->rule_set_count] = (Rule){ .target_dir_idx = target_idx };
-  int written = snprintf(out->rule_set[out->rule_set_count].match, PATH_MAX, "%s", match);
-  if (written != (int)match_size) return -1;
-  out->rule_set_count++;
+  if (out->rule_set_count == MAX_RULES) return -1;
+
+  Rule rule = (Rule){ .target_dir_idx = target_idx };
+  int written = snprintf(rule.match, sizeof(rule.match), "%s", match);
+  if (written != (int)strlen(match)) return -1;
+
+  out->rule_set[out->rule_set_count++] = rule;
   return 0;
 }
 
-size_t rules_set_path_find_idx(const Rules *rules, const char *string) {
+ssize_t rules_set_path_find_idx(const Rules *rules, const char *string) {
   for (size_t i = 0; i < rules->rule_set_count; i++) {
     Rule rule = rules->rule_set[i];
-    if (fnmatch(rule.match, string, FNM_CASEFOLD | FNM_PERIOD) == 0) {
+    if (fnmatch(rule.match, string, FNM_PERIOD | FNM_CASEFOLD) == 0) {
       return rule.target_dir_idx;
     }
   }
 
-  return rules->fallback_idx;
+  return CONFIG_IGNORE_IDX;
 }
 
 static config_error_t rules_watch_build(Rules *out, const toml_result_t *result) {
@@ -97,20 +99,22 @@ static config_error_t rules_watch_build(Rules *out, const toml_result_t *result)
 
     if (file_normalize(config_watch_path.u.s, out->watch_paths[i].s) != 0 && errno != ENOENT) goto fail;
 
+    // if any ignores exist we can process them here
     toml_datum_t config_watch_ignores;
     err = config_get(watch_table, "ignore", TOML_ARRAY, &config_watch_ignores);
-    if (err.kind != CONFIG_OK) goto fail;
 
-    for (int32_t k = 0; k < config_watch_ignores.u.arr.size; k++) {
-      const toml_datum_t ignore = config_watch_ignores.u.arr.elem[k];
+    if (err.kind == CONFIG_OK) {
+      for (int32_t k = 0; k < config_watch_ignores.u.arr.size; k++) {
+        const toml_datum_t ignore = config_watch_ignores.u.arr.elem[k];
 
-      err = config_type_check(ignore.type, TOML_STRING, CONFIG_WATCH_IGNORE);
+        err = config_type_check(ignore.type, TOML_STRING, CONFIG_WATCH_IGNORE);
 
-      if (err.kind != CONFIG_OK) goto fail;
+        if (err.kind != CONFIG_OK) goto fail;
 
-      if(rules_set_add(out, ignore.u.s, CONFIG_IGNORE_IDX)) {
-        err.sys_errno = errno;
-        goto fail;
+        if(rules_set_add(out, ignore.u.s, CONFIG_IGNORE_IDX)) {
+          err.sys_errno = errno;
+          goto fail;
+        }
       }
     }
   }
@@ -137,7 +141,7 @@ static config_error_t rules_dest_build(Rules *out, const toml_result_t *result) 
   if (err.kind != CONFIG_OK) goto fail;
 
   // N dest dirs and 1 default
-  out->dir_count = 1 + config_dest_tables.u.arr.size;
+  out->dir_count = config_dest_tables.u.arr.size;
   out->dir_paths = calloc(out->dir_count, sizeof(CanonicalPath));
   if(!out->dir_paths) {
     err.sys_errno = errno;
@@ -145,7 +149,7 @@ static config_error_t rules_dest_build(Rules *out, const toml_result_t *result) 
   }
 
   // subtracting 1 to avoid looping over the fallback spot
-  for (size_t i = 0; i < out->dir_count - 1; i++) {
+  for (size_t i = 0; i < out->dir_count; i++) {
     const toml_datum_t dest_table = config_dest_tables.u.arr.elem[i];
     err = config_type_check(dest_table.type, TOML_TABLE, CONFIG_DEST_TABLE);
     if (err.kind != CONFIG_OK) goto fail;
@@ -173,12 +177,6 @@ static config_error_t rules_dest_build(Rules *out, const toml_result_t *result) 
         goto fail;
       }
     }
-  }
-
-  out->fallback_idx = out->dir_count - 1;
-  if (file_normalize(default_path.u.s, out->dir_paths[out->fallback_idx].s) == -1) {
-    err.sys_errno = errno;
-    goto fail;
   }
 
   err.kind = CONFIG_OK;
