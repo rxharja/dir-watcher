@@ -10,7 +10,11 @@ typedef struct { char s[PATH_MAX]; } CanonicalPath;
 
 typedef struct { int fd; dev_t st_dev; } DirHandle;
 
-typedef struct { DirHandle dir; int wd; } WatchedDirHandle;
+typedef struct { 
+  DirHandle dir;
+  int wd; // watched fd
+  int td; // timer fd
+} WatchedDirHandle;
 
 typedef struct {
   const char *name;

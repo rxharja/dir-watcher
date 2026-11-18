@@ -17,6 +17,11 @@ typedef struct {
 } Rule;
 
 typedef struct {
+  uint64_t settle_sec;
+  CanonicalPath path;
+} WatchedPath;
+
+typedef struct {
   size_t dir_count;
   size_t watch_path_count;
   size_t rule_set_count;
@@ -24,7 +29,7 @@ typedef struct {
   Rule rule_set[MAX_RULES]; 
 
   CanonicalPath *dir_paths; // set of target dirs
-  CanonicalPath *watch_paths; // set of watched paths
+  WatchedPath *watch_paths;
 } Rules;
 
 typedef enum {

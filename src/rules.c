@@ -82,7 +82,7 @@ static config_error_t rules_watch_build(Rules *out, const toml_result_t *result)
   if (err.kind != CONFIG_OK) goto fail;
 
   out->watch_path_count = config_watch_tables.u.arr.size;
-  out->watch_paths = calloc(out->watch_path_count, sizeof(CanonicalPath));
+  out->watch_paths = calloc(out->watch_path_count, sizeof(out->watch_paths[0]));
   if(!out->watch_paths) {
     err.sys_errno = errno;
     goto fail;
@@ -97,7 +97,13 @@ static config_error_t rules_watch_build(Rules *out, const toml_result_t *result)
     err = config_get(watch_table, "path", TOML_STRING, &config_watch_path);
     if (err.kind != CONFIG_OK) goto fail;
 
-    if (file_normalize(config_watch_path.u.s, out->watch_paths[i].s) != 0 && errno != ENOENT) goto fail;
+    if (file_normalize(config_watch_path.u.s, out->watch_paths[i].path.s) != 0 && errno != ENOENT) goto fail;
+
+    toml_datum_t config_watch_settle_sec; 
+    err = config_get(watch_table, CONFIG_WATCH_SETTLE_SECONDS, TOML_INT64, &config_watch_settle_sec);
+    if (err.kind == CONFIG_MISSING) out->watch_paths[i].settle_sec = CONFIG_DEFAULT_SETTLE_SECONDS;
+    else if (err.kind == CONFIG_OK) out->watch_paths[i].settle_sec = config_watch_settle_sec.u.int64;
+    else goto fail;
 
     // if any ignores exist we can process them here
     toml_datum_t config_watch_ignores;

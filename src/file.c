@@ -124,6 +124,7 @@ static int file_relative_expand(const char *dir_path, char *out) {
 int file_normalize(const char *dir_path, char *out) {
   assert(out != NULL);
   const char *path_ptr = dir_path;
+  char path_raw[PATH_MAX];
 
   if(dir_path[0] == '\0') {
     perror("The supplied directory was empty.\n");
@@ -133,21 +134,20 @@ int file_normalize(const char *dir_path, char *out) {
   if (dir_path[0] == '/') return file_write_path_to_buf(dir_path, "", out);
 
   if (dir_path[0] == '~') {
-    if (file_tilde_expand(path_ptr, out) < 0) {
+    if (file_tilde_expand(path_ptr, path_raw) < 0) {
       fprintf(stderr, "Cannot expand '~' for path %s.\n", dir_path);
       return -1;
     }
   }
   else if (dir_path[0] == '.' || dir_path[0] != '/') {
-      if (file_relative_expand(dir_path, out) != 0) {
+      if (file_relative_expand(dir_path, path_raw) != 0) {
         fprintf(stderr, "Cannot expand relative path for path %s.\n", dir_path);
         return -1;
       }
   }
 
-
   // dir creation is handled downstream so it is safe to egnore ENOENT
-  if (realpath(out, out) == NULL && errno != ENOENT) {
+  if (realpath(path_raw, out) == NULL && errno != ENOENT) {
     perror("realpath");
     return -1;
   }
