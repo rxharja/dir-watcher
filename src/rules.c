@@ -108,7 +108,7 @@ static config_error_t rules_watch_build(Rules *out, const toml_result_t *result)
 
       if (err.kind != CONFIG_OK) goto fail;
 
-      if(rules_set_add(out, ignore.u.s, RULES_IGNORE_IDX)) {
+      if(rules_set_add(out, ignore.u.s, CONFIG_IGNORE_IDX)) {
         err.sys_errno = errno;
         goto fail;
       }

@@ -10,11 +10,6 @@
 #include "file.h"
 
 // +1 so index 0 doesn't encode to NULL (dict_find's "absent" value)
-#define IDX_TO_VAL(i) ((void *)(uintptr_t)((i) + 1))
-#define VAL_TO_IDX(v) ((size_t)(uintptr_t)(v) - 1)
-#define RULE_EXCLUDE ((void *)UINTPTR_MAX)
-#define RULES_FALLBACK_IDX 0
-#define RULES_IGNORE_IDX -1
 
 typedef struct {
   ssize_t target_dir_idx; // -1 means exclude

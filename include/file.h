@@ -36,6 +36,4 @@ int file_basename_build(const char * fpath, BaseName *b);
 
 int file_move(const DirHandle *origin, const DirHandle* destination, const BaseName *bname);
 
-DirHandle file_dir_build(int fd, dev_t st_dev, char *path_raw); 
-
 #endif // !FILE_H
