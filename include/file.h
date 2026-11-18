@@ -1,7 +1,6 @@
 #ifndef FILE_H
 #define FILE_H
 
-#include "dictionary.h"
 #include <linux/limits.h>
 #include <stddef.h>
 #include <sys/types.h>
@@ -22,8 +21,6 @@ static const char default_dir[] = "/home/redonxharja/projects/dir-watcher/output
 
 // normalize file path -> build a Dir from the file path
 int file_normalize(const char *dir_path, char *out);
-
-char* file_dir(const Dictionary *dict, const char *file_name);
 
 int file_move(const DirHandle *origin, const DirHandle* destination, const BaseName *bname);
 

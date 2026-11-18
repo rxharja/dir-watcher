@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <linux/limits.h>
 #include <poll.h>
 #include <signal.h>
@@ -10,54 +11,6 @@
 #include <sys/signalfd.h>
 #include <errno.h>
 #include "app.h"
-
-static void events_handle(const AppCtx *app) {
-  char buf[sizeof(struct inotify_event) + NAME_MAX + 1] __attribute__((aligned(__alignof__(struct inotify_event))));
-
-  const struct inotify_event *event; 
-
-  ssize_t size;
-
-  for (;;) {
-    size = read(app->handles.inotify_fd, buf, sizeof buf);
-
-    if (size == -1 && errno != EAGAIN) {
-      perror("read");
-      exit(EXIT_FAILURE);
-    }
-
-    if (size <= 0) break;
-
-    for (char *ptr = buf; ptr < buf + size; ptr += sizeof(struct inotify_event) + event->len) {
-      event = (const struct inotify_event*)ptr;
-      if (event->mask & IN_CLOSE_WRITE) printf("IN_CLOSE_WRITE: ");
-      if (event->mask & IN_MOVED_TO) printf("IN_MOVED_TO: ");
-    }
-
-    for (int i = 0; i < app->rules.watch_path_count; ++i) {
-      if (app->handles.watched[i].wd == event->wd) {
-        printf("%s/", app->rules.watch_paths[i].s);
-        break;
-      }
-    }
-
-    if (event->len) printf("%s", event->name);
-    if (event->mask & IN_ISDIR) printf(" [directory]\n");
-    else printf(" [file]\n");
-
-    for (char *ptr = buf; ptr < buf + size; ptr += sizeof(struct inotify_event) + event->len) {
-      event = (const struct inotify_event*)ptr;
-      if (event->mask & (IN_CLOSE_WRITE | IN_MOVED_TO)) {
-        for (int i = 0; i < app->rules.watch_path_count; ++i) {
-          if (app->handles.watched[i].wd == event->wd && event->len) {
-            file_move_handle(app, &app->handles.watched[i], event->name);
-            break;
-          }
-        }
-      }
-    }
-  }
-}
 
 ssize_t signal_setup() {
   sigset_t mask;
@@ -80,12 +33,6 @@ ssize_t signal_setup() {
   return sig_fd;
 }
 
-void watched_dirs_show(AppCtx *app) {
-  for (int i = 0; i < app->rules.watch_path_count; i++) {
-    printf("Watching: %s/\n", app->rules.watch_paths[i].s);
-  }
-}
-
 int main(void) {
   AppCtx app = {0};
   if (app_setup(&app) != 0) {
@@ -94,7 +41,7 @@ int main(void) {
     exit(EXIT_FAILURE);
   }
 
-  watched_dirs_show(&app);
+  app_watched_dirs_show(&app);
 
   struct signalfd_siginfo fdsi;
   ssize_t signal_size;
@@ -133,7 +80,7 @@ int main(void) {
         else continue;
       }
 
-      if (fds[1].revents & POLLIN) events_handle(&app);
+      if (fds[1].revents & POLLIN) app_events_handle(&app);
     }
   }
 

@@ -1,4 +1,3 @@
-#include "dictionary.h"
 #include "file.h"
 #include "rules.h"
 #include <assert.h>
@@ -6,6 +5,7 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/inotify.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -108,22 +108,75 @@ void app_handles_close(const Handles *h) {
   free(h->dirs);
 }
 
-int file_move_handle(const AppCtx *app, const WatchedDirHandle *origin, const char *target_path) {
+int app_file_move(const AppCtx *app, const WatchedDirHandle *origin, const char *target_path) {
   assert(app);
   assert(origin);
   assert(target_path);
   
   BaseName base_name = {0};
-
   if (file_basename_build(target_path, &base_name) != 0) {
     perror("file_basename_build");
     return -1;
   }
 
-  void *v = dict_find(app->rules.by_ext, base_name.ext);
-  if (!v) v = dict_find(app->rules.by_name, base_name.ext);
-  if (v == RULE_EXCLUDE) return 0;
-  const size_t idx = v ? VAL_TO_IDX(v) : app->rules.fallback_idx;
-
+  size_t idx = rules_set_path_find_idx(&app->rules, target_path);
   return file_move(&origin->dir, &app->handles.dirs[idx], &base_name);
 }
+
+void app_watched_dirs_show(const AppCtx *app) {
+  assert(app);
+  assert(app->rules.watch_paths);
+
+  for (int i = 0; i < app->rules.watch_path_count; i++) {
+    printf("Watching: %s/\n", app->rules.watch_paths[i].s);
+  }
+}
+
+void app_events_handle(const AppCtx *app) {
+  char buf[sizeof(struct inotify_event) + NAME_MAX + 1] __attribute__((aligned(__alignof__(struct inotify_event))));
+
+  const struct inotify_event *event; 
+
+  ssize_t size;
+
+  for (;;) {
+    size = read(app->handles.inotify_fd, buf, sizeof buf);
+
+    if (size == -1 && errno != EAGAIN) {
+      perror("read");
+      exit(EXIT_FAILURE);
+    }
+
+    if (size <= 0) break;
+
+    for (char *ptr = buf; ptr < buf + size; ptr += sizeof(struct inotify_event) + event->len) {
+      event = (const struct inotify_event*)ptr;
+      if (event->mask & IN_CLOSE_WRITE) printf("IN_CLOSE_WRITE: ");
+      if (event->mask & IN_MOVED_TO) printf("IN_MOVED_TO: ");
+    }
+
+    for (int i = 0; i < app->rules.watch_path_count; ++i) {
+      if (app->handles.watched[i].wd == event->wd) {
+        printf("%s/", app->rules.watch_paths[i].s);
+        break;
+      }
+    }
+
+    if (event->len) printf("%s", event->name);
+    if (event->mask & IN_ISDIR) printf(" [directory]\n");
+    else printf(" [file]\n");
+
+    for (char *ptr = buf; ptr < buf + size; ptr += sizeof(struct inotify_event) + event->len) {
+      event = (const struct inotify_event*)ptr;
+      if (event->mask & (IN_CLOSE_WRITE | IN_MOVED_TO)) {
+        for (int i = 0; i < app->rules.watch_path_count; ++i) {
+          if (app->handles.watched[i].wd == event->wd && event->len) {
+            app_file_move(app, &app->handles.watched[i], event->name);
+            break;
+          }
+        }
+      }
+    }
+  }
+}
+

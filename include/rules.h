@@ -4,38 +4,33 @@
 
 #ifndef DIR_WATCHER_RULES_H
 #define DIR_WATCHER_RULES_H
-#include "dictionary.h"
-#include "file.h"
+#include <linux/limits.h>
 #include <tomlc17.h>
+#include "config.h"
+#include "file.h"
 
 // +1 so index 0 doesn't encode to NULL (dict_find's "absent" value)
 #define IDX_TO_VAL(i) ((void *)(uintptr_t)((i) + 1))
 #define VAL_TO_IDX(v) ((size_t)(uintptr_t)(v) - 1)
 #define RULE_EXCLUDE ((void *)UINTPTR_MAX)
-
 #define RULES_FALLBACK_IDX 0
-#define CONFIG_DEFAULTS_ON_CONFLICT "defaults.on_conflict"
-#define CONFIG_DEFAULTS_DEST_PATH "defaults.dest_path"
-#define CONFIG_DEFAULTS_DRY_RUN "defaults.dry_run"
-#define CONFIG_WATCH_PATH "watch.path"
-#define CONFIG_WATCH_IGNORE "watch.ignore"
-#define CONFIG_WATCH_SETTLE_SECONDS "watch.settle_seconds"
-#define CONFIG_DEST_PATH "dest.path"
-#define CONFIG_DEST_EXTENSIONS "extensions"
-#define CONFIG_WATCH_TABLE "watch"
-#define CONFIG_DEST_TABLE "dest"
+#define RULES_IGNORE_IDX -1
 
 typedef struct {
-    Dictionary *by_name;
-    Dictionary *by_ext;
+  ssize_t target_dir_idx; // -1 means exclude
+  char match[1024];
+} Rule;
 
-    CanonicalPath *dir_paths;
-    size_t dir_count;
+typedef struct {
+  size_t fallback_idx;
+  size_t dir_count;
+  size_t watch_path_count;
+  size_t rule_set_count;
 
-    CanonicalPath *watch_paths;
-    size_t watch_path_count;
+  Rule rule_set[MAX_RULES]; 
 
-    size_t fallback_idx;
+  CanonicalPath *dir_paths; // set of target dirs
+  CanonicalPath *watch_paths; // set of watched paths
 } Rules;
 
 typedef enum {
@@ -55,8 +50,8 @@ config_error_t rules_build(Rules *out, const char *config_path);
 
 void rules_deinit(Rules *out);
 
+size_t rules_set_path_find_idx(const Rules *rules, const char *string);
+
 const char* rules_config_strerror(config_parse_err err);
 
-
-static config_error_t rules_watch_build(Rules *out, const toml_result_t *result);
 #endif //DIR_WATCHER_RULES_H

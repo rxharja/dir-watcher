@@ -6,6 +6,11 @@ dest_path = "~/projects/dir-watcher/output"
 dry_run = false
 
 [[watch]]
+path="~/"
+ignore = [".part", ".crdownload"]
+settle_seconds = 2
+
+[[watch]]
 path="~/Downloads"
 ignore = [".part", ".crdownload"]
 settle_seconds = 2
@@ -17,4 +22,3 @@ extensions=[".txt", ".md"]
 [[dest]]
 path="~/archives"
 extensions=[".tar", ".tar.gz", ".zip"]
-

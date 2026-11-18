@@ -1,6 +1,6 @@
 #ifndef APP_H
 #define APP_H
-#include "dictionary.h"
+
 #include "file.h"
 #include "rules.h"
 
@@ -28,6 +28,10 @@ int app_setup(AppCtx *app);
 
 void app_destroy(AppCtx *app);
 
-int file_move_handle(const AppCtx *app, const WatchedDirHandle *origin, const char *target_path);
+int app_file_move(const AppCtx *app, const WatchedDirHandle *origin, const char *target_path);
+
+void app_watched_dirs_show(const AppCtx *app);
+
+void app_events_handle(const AppCtx *app);
 
 #endif
