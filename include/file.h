@@ -30,4 +30,6 @@ int file_dir_stat(const int dir_fd, dev_t *st_dev);
 
 int file_move(const DirHandle *origin, const DirHandle* destination, const char *fname);
 
+int file_config_dir_get(CanonicalPath *out);
+
 #endif // !FILE_H

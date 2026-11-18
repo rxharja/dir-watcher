@@ -79,14 +79,25 @@ static int file_tilde_expand(const char *dir_path, char *out) {
   return file_write_path_to_buf(pw->pw_dir, dir_path + 1, out);
 }
 
+int file_config_dir_get(CanonicalPath *out) {
+  char app_dir[PATH_MAX];
+
+  const char *xdg_config = getenv("XDG_CONFIG_HOME");
+
+  if (xdg_config) file_write_path_to_buf(xdg_config, "dir-watcher", app_dir);
+  else {
+    char default_config_dir[PATH_MAX];
+    if (file_write_path_to_buf(getenv("HOME"), ".config", default_config_dir) != 0) return -1;
+    if (file_write_path_to_buf(default_config_dir, "dir-watcher", app_dir) != 0) return -1;
+  }
+
+  if (file_normalize(app_dir, out->s) != 0) return -1;
+  return 0;
+}
+
 static int file_relative_expand(const char *dir_path, char *out) {
   assert(dir_path);
   assert(out);
-
-  // assuming we can supply our config, it should replace the start of the path
-  //
-  // check for relative with ./
-  // check for relative with no ./
 
   // assert the path does not start with / 
   if (dir_path[1] != '/') {
@@ -95,10 +106,14 @@ static int file_relative_expand(const char *dir_path, char *out) {
   }
 
   // todo: temp relative path
-  static char relative_path[] = "/home/redonxharja/tmp";
+  CanonicalPath config_path = {0};
+  if (file_config_dir_get(&config_path) != 0) {
+    fprintf(stderr, "Could not establish config directory");
+    return -1;
+  }
 
   // const char *rel_dir_path = dir_path[0] == '.' ? dir_path + 1 : dir_path;
-  if (file_write_path_to_buf(relative_path, dir_path, out) != 0) {
+  if (file_write_path_to_buf(config_path.s, dir_path, out) != 0) {
     printf("Cannot expand relative path for %s.\n", dir_path);
     return -1;
   }
@@ -114,6 +129,8 @@ int file_normalize(const char *dir_path, char *out) {
     perror("The supplied directory was empty.\n");
     return -1;
   }
+
+  if (dir_path[0] == '/') return file_write_path_to_buf(dir_path, "", out);
 
   if (dir_path[0] == '~') {
     if (file_tilde_expand(path_ptr, out) < 0) {

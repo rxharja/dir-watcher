@@ -2,6 +2,7 @@
 #include "rules.h"
 #include <assert.h>
 #include <errno.h>
+#include <linux/limits.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,10 +31,16 @@ static void error_show(const config_error_t config_err) {
 int app_setup(AppCtx *app) {
   assert(app);
 
-  config_error_t config_err = rules_build(&app->rules, "examples/config.toml"); 
+  CanonicalPath config_dir = {0};
+  if (file_config_dir_get(&config_dir) != 0) return -1;
+
+  CanonicalPath config = {0};
+  if (snprintf(config.s, PATH_MAX, "%s/config.toml", config_dir.s) == -1) return -1;
+
+  config_error_t config_err = rules_build(&app->rules, config.s); 
   if (config_err.kind != CONFIG_OK) {
-    return -1;
     error_show(config_err);
+    return -1;
   }
 
   if (app_handles_open(&app->rules, &app->handles) != 0) return 1;
