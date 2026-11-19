@@ -14,6 +14,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <stdint.h>
+#include <dirent.h>
 #include "app.h"
 
 static void error_show(const config_error_t config_err) {
@@ -82,7 +83,7 @@ int app_handles_open(const Rules *rules, Handles *h) {
 
   for (size_t i = 0; i < h->watched_count; i++) {
     h->watched[i].wd = inotify_add_watch(h->inotify_fd, rules->watch_paths[i].path.s, flags);
-    if (app_file_setup(&rules->watch_paths->path, &h->watched[i].dir.fd, &h->watched[i].dir.st_dev) != 0) goto fail;
+    if (app_file_setup(&rules->watch_paths[i].path, &h->watched[i].dir.fd, &h->watched[i].dir.st_dev) != 0) goto fail;
 
     if (h->watched[i].wd == -1) {
       fprintf(stderr, "Cannot watch '%s': %s\n", rules->watch_paths[i].path.s, strerror(errno));
@@ -147,6 +148,44 @@ void app_watched_dirs_show(const AppCtx *app) {
   }
 }
 
+int app_watch_timer_arm(const AppCtx *ctx, size_t idx) {
+  struct itimerspec timer_spec = {0};
+  timer_spec.it_value.tv_sec = ctx->rules.watch_paths[idx].settle_sec;
+
+  if (timerfd_settime(ctx->handles.watched[idx].td, 0, &timer_spec, NULL) == -1) {
+    perror("timerfd_settime");
+    return -1;
+  } 
+
+  return 0;
+}
+
+int app_watch_timer_handle(const AppCtx *app, size_t idx) {
+  uint64_t exp;
+  ssize_t s = read(app->handles.watched[idx].td, &exp, sizeof(exp));
+
+  if (s != sizeof(exp)) {
+    perror("read");
+    return -1;
+  }
+
+  struct dirent **namelist;
+  ssize_t entries = scandirat(app->handles.watched[idx].dir.fd, ".", &namelist, NULL, alphasort); 
+  if (entries == -1) {
+    perror("scandir");
+    return -1;
+  }
+
+  while (entries--) {
+    app_file_move(app, &app->handles.watched[idx], namelist[entries]->d_name);
+    free(namelist[entries]);
+  }
+
+  free(namelist);
+
+  return 0;
+}
+
 void app_events_handle(const AppCtx *app) {
   char buf[sizeof(struct inotify_event) + NAME_MAX + 1] __attribute__((aligned(__alignof__(struct inotify_event))));
 
@@ -183,10 +222,11 @@ void app_events_handle(const AppCtx *app) {
 
     for (char *ptr = buf; ptr < buf + size; ptr += sizeof(struct inotify_event) + event->len) {
       event = (const struct inotify_event*)ptr;
-      if (event->mask & (IN_CLOSE_WRITE | IN_MOVED_TO)) {
+      if (event->mask & (IN_MODIFY | IN_CLOSE_WRITE | IN_MOVED_TO)) {
         for (size_t i = 0; i < app->rules.watch_path_count; ++i) {
           if (app->handles.watched[i].wd == event->wd && event->len) {
-            app_file_move(app, &app->handles.watched[i], event->name);
+            app_watch_timer_arm(app, i); // arm the timer on IN_MODIFY | IN_CLOSE_WRITE | IN_MOVED_TO
+            // app_file_move(app, &app->handles.watched[i], event->name);
             break;
           }
         }
@@ -203,29 +243,4 @@ int app_watch_timer_create() {
   }
 
   return fd;
-}
-
-int app_watch_timer_arm(AppCtx *ctx, size_t idx) {
-  struct itimerspec timer_spec = {0};
-  timer_spec.it_value.tv_sec = ctx->rules.watch_paths[idx].settle_sec;
-
-  if (timerfd_settime(ctx->handles.watched[idx].td, 0, &timer_spec, NULL) == -1) {
-    perror("timerfd_settime");
-    return -1;
-  } 
-
-  return 0;
-}
-
-int app_watch_timer_handle(AppCtx *app, int idx, const char *fpath) {
-  uint64_t exp;
-  ssize_t s = read(app->handles.watched[idx].td, &exp, sizeof(exp));
-
-  if (s != sizeof(exp)) {
-    perror("read");
-    return -1;
-  }
-
-  app_file_move(app, &app->handles.watched[idx], fpath);
-  return 0;
 }

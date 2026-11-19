@@ -217,7 +217,12 @@ int file_dir_stat(const int dir_fd, dev_t *st_dev) {
 int file_move(const DirHandle *origin, const DirHandle* destination, const char *fname) {
   int res = renameat2(origin->fd, fname, destination->fd, fname, RENAME_NOREPLACE);
 
-  if (res != 0) {
+  if (res == EEXIST) {
+    // handle file collision based on a rule in the config; REPLACE | RENAME | NOTHING
+  }
+
+  // a moved or deleted file can be ignored
+  if (res != 0 || res != ENOENT) {
     perror("renameat2");
     return -1;
   }

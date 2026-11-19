@@ -77,8 +77,8 @@ int main(void) {
       // Management of timer fd's triggering
       for (size_t i = 2; i < nfds; i++) {
         if (fds[i].revents & POLLIN) {
-          // todo: replace with the app_watch_timer_handle call
-          printf("Timer triggered\n");
+          // subtracting 2 to shift it back to watch path count
+          app_watch_timer_handle(&app, i - 2); 
         }
       }
 

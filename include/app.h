@@ -37,6 +37,6 @@ void app_events_handle(const AppCtx *app);
 
 int app_watch_timer_create();
 
-int app_watch_timer_handle(AppCtx *app, int idx, const char *fpath);
+int app_watch_timer_handle(const AppCtx *app, size_t idx);
 
 #endif

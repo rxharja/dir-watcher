@@ -1,5 +1,5 @@
 -xc
--std=gnu17
+-std=gnu99
 -Iinclude
 -isystem
 vendor/tomlc17/src
