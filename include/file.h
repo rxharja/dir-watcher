@@ -16,24 +16,55 @@ typedef struct {
   int td; // timer fd
 } WatchedDirHandle;
 
+typedef enum {
+  FILE_OK = 0,
+
+  // bad input: user config is wrong
+  FILE_ERR_PATH_EMPTY,
+  FILE_ERR_PATH_MALFORMED,
+  FILE_ERR_PATH_TOO_LONG,
+
+  // environment
+  FILE_ERR_NO_HOME,
+
+  // filesystem states
+  FILE_ERR_NOT_FOUND,
+  FILE_ERR_EXISTS,
+
+  // syscall failure, details in errno
+  FILE_ERR_SYSTEM
+} FileStatusType;
+
 typedef struct {
-  const char *name;
-  const char *ext;
-} BaseName;
+  FileStatusType kind;
+  int sys_errno;
+  const char *path; // borrowed, valid only whiel caller's buffer is
+} FileStatus;
+
+__attribute__((warn_unused_result))
+const char *file_streerror(const FileStatusType kind);
 
 // normalize file path -> build a Dir from the file path
-int file_normalize(const char *dir_path, char *out);
+__attribute__((warn_unused_result))
+FileStatus file_normalize(const char *dir_path, char *out);
 
-int file_normalize(const char *dir_path, char *out);
+__attribute__((warn_unused_result))
+FileStatus file_dir_create(const CanonicalPath *dir_path);
 
-int file_dir_create(const CanonicalPath *dir_path);
+__attribute__((warn_unused_result))
+FileStatus file_dir_open(const CanonicalPath *dir_path, int *dir_fd);
 
-int file_dir_open(const CanonicalPath *dir_path, int *dir_fd);
+__attribute__((warn_unused_result))
+FileStatus file_dir_stat(const int dir_fd, dev_t *st_dev);
 
-int file_dir_stat(const int dir_fd, dev_t *st_dev);
+__attribute__((warn_unused_result))
+FileStatus file_move(const DirHandle *origin, const DirHandle* destination, const char *fname);
 
-int file_move(const DirHandle *origin, const DirHandle* destination, const char *fname);
+__attribute__((warn_unused_result))
+FileStatus file_config_dir_get(CanonicalPath *out);
 
-int file_config_dir_get(CanonicalPath *out);
 
+FileStatus file_dir_ensure_open(const CanonicalPath *path, int *fd, dev_t *st_dev);
+
+void file_err_show(const int errsv, const char * dir_path);
 #endif // !FILE_H

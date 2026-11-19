@@ -14,6 +14,36 @@
 #include <sys/stat.h>
 #include <pwd.h>
 
+static FileStatus file_ok(void) {
+  return (FileStatus) { .kind = FILE_OK };
+}
+
+static FileStatus file_fail(FileStatusType kind, const char *path) {
+  return (FileStatus) { .kind = kind, .path = path };
+}
+
+static FileStatus file_from_errno(int e, const char *path) {
+  FileStatusType kind = e == ENOENT ? FILE_ERR_NOT_FOUND
+                : e == EEXIST ? FILE_ERR_EXISTS
+                :               FILE_ERR_SYSTEM;
+
+  return (FileStatus) { .kind = kind, .sys_errno = e, .path = path };
+}
+
+const char *file_streerror(const FileStatusType kind) {
+  switch (kind) {
+    case FILE_OK: return "ok";
+    case FILE_ERR_PATH_EMPTY: return "path is empty";
+    case FILE_ERR_PATH_MALFORMED: return "path is malformed";
+    case FILE_ERR_PATH_TOO_LONG: return "path exceeds PATH_MAX";
+    case FILE_ERR_NO_HOME: return "could not determine home directory";
+    case FILE_ERR_NOT_FOUND: return "not found";
+    case FILE_ERR_EXISTS: return "already exists";
+    case FILE_ERR_SYSTEM: return "system error";
+    default: return "unknown";
+  }
+}
+
 void file_err_show(const int errsv, const char * dir_path) {
   switch (errsv) {
     case ENOTDIR: // config mistake, dir isn't a dir
@@ -33,130 +63,122 @@ void file_err_show(const int errsv, const char * dir_path) {
   }
 }
 
-static int file_write_path_to_buf(const char *part1, const char *part2, char* out) {
-  assert(part1);
-  assert(part2);
-  assert(out);
+static FileStatus file_write_path_to_buf(const char *part1, const char *part2, char* out) {
+  assert(part1 && part2 && out);
 
-  size_t part1_len = strlen(part1);
-  const char *sep = (part1_len >  0 && part1[part1_len -1] == '/') ? "" : "/";
+  size_t len = strlen(part1);
+  const char *sep = (len >  0 && part1[len -1] == '/') ? "" : "/";
 
   int n = snprintf(out, PATH_MAX, "%s%s%s", part1, sep, part2);
+  assert( n >= 0);
+  if ((size_t)n >= PATH_MAX) return file_fail(FILE_ERR_PATH_TOO_LONG, NULL);
 
-  if (n < 0) return -1;
-
-  if ((size_t)n >= PATH_MAX) {
-    errno = ENAMETOOLONG;
-    return -1;
-  }
-
-  return 0;
+  return file_ok();
 }
 
-static int file_tilde_expand(const char *dir_path, char *out) {
-  assert(out != NULL);
-  assert(dir_path);
-  assert(dir_path[0] == '~');
+static FileStatus file_home_dir_get(const char **out) {
+  const char *home = getenv("HOME");
+  if (home && home[0] == '/') {
+    *out = home;
+    return file_ok();
+  }
+
+  errno = 0;
+  struct passwd *pw = getpwuid(getuid());
+  if (!pw || !pw->pw_dir || pw->pw_dir[0] != '/') {
+    return (FileStatus){ .kind = FILE_ERR_NO_HOME, .sys_errno = errno };
+  }
+
+  *out = pw->pw_dir;
+  return file_ok();
+}
+
+
+static FileStatus file_tilde_expand(const char *dir_path, char *out) {
+  assert(out && dir_path && dir_path[0] == '~');
 
   // assert the path starts with ~/ otherwise it's malformed
-  if (dir_path[1] != '/') {
-    fprintf(stderr, "Incorrectly formatted path for %s", dir_path);
-    return -1;
-  }
+  if (dir_path[1] != '\0' && dir_path[1] != '/') return file_fail(FILE_ERR_PATH_MALFORMED, dir_path);
 
-  // skip ~ so that we can join them properly
-  const char *rest_of_path_ptr = dir_path + 1; 
+  const char *home;
+  FileStatus err = file_home_dir_get(&home);
 
-  const char *home_dir = getenv("HOME");
-  if (home_dir != NULL && home_dir[0] != '\0') {
-    return file_write_path_to_buf(home_dir, rest_of_path_ptr, out);
-  }
+  if (err.kind == FILE_OK) file_write_path_to_buf(home, dir_path + 1, out);
+  if (err.kind != FILE_OK) err.path = dir_path;
 
-  struct passwd *pw = getpwuid(getuid());
-  if (pw == NULL) return -1;
-  if (pw->pw_dir == NULL) return -1;
-
-  return file_write_path_to_buf(pw->pw_dir, dir_path + 1, out);
+  return err;
 }
 
-int file_config_dir_get(CanonicalPath *out) {
-  char app_dir[PATH_MAX];
-
-  const char *xdg_config = getenv("XDG_CONFIG_HOME");
-
-  if (xdg_config) file_write_path_to_buf(xdg_config, "dir-watcher", app_dir);
-  else {
-    char default_config_dir[PATH_MAX];
-    if (file_write_path_to_buf(getenv("HOME"), ".config", default_config_dir) != 0) return -1;
-    if (file_write_path_to_buf(default_config_dir, "dir-watcher", app_dir) != 0) return -1;
-  }
-
-  if (file_normalize(app_dir, out->s) != 0) return -1;
-  return 0;
-}
-
-static int file_relative_expand(const char *dir_path, char *out) {
-  assert(dir_path);
+FileStatus file_config_dir_get(CanonicalPath *out) {
   assert(out);
 
-  // assert the path does not start with / 
-  if (dir_path[1] != '/') {
-    fprintf(stderr, "Incorrectly formatted path for %s", dir_path);
-    return -1;
+  char app_dir[PATH_MAX];
+  FileStatus err = {0};
+
+  const char *xdg = getenv("XDG_CONFIG_HOME");
+  if (xdg && xdg[0] == '/') err = file_write_path_to_buf(xdg, "dir-watcher", app_dir);
+  else {
+    const char *home;
+    err = file_home_dir_get(&home);
+    if (err.kind == FILE_OK) err = file_write_path_to_buf(home, ".config/dir-watcher", app_dir);
   }
 
-  // todo: temp relative path
-  CanonicalPath config_path = {0};
-  if (file_config_dir_get(&config_path) != 0) {
-    fprintf(stderr, "Could not establish config directory");
-    return -1;
-  }
-
-  // const char *rel_dir_path = dir_path[0] == '.' ? dir_path + 1 : dir_path;
-  if (file_write_path_to_buf(config_path.s, dir_path, out) != 0) {
-    printf("Cannot expand relative path for %s.\n", dir_path);
-    return -1;
-  }
-
-  return 0;
+  if (err.kind == FILE_OK) err = file_normalize(app_dir, out->s);
+  if (err.kind != FILE_OK) err.path = "config direcotry";
+  return err;
 }
 
-int file_normalize(const char *dir_path, char *out) {
-  assert(out != NULL);
+static FileStatus file_relative_expand(const char *dir_path, char *out) {
+  assert(dir_path && out);
+  assert(dir_path[0] != '/' && dir_path[0] != '~');
+
+  CanonicalPath config_path = {0};
+  FileStatus err = file_config_dir_get(&config_path);
+
+  if (err.kind == FILE_OK || err.kind == FILE_ERR_NOT_FOUND) {
+    err = file_write_path_to_buf(config_path.s, dir_path, out);
+  }
+  if (err.kind != FILE_OK) err.path = dir_path;
+
+  return err;
+}
+
+__attribute__((warn_unused_result))
+FileStatus file_normalize(const char *dir_path, char *out) {
+  assert(dir_path && out);
+
+  if (dir_path[0] == '\0') return file_fail(FILE_ERR_PATH_EMPTY, dir_path);
+
   const char *path_ptr = dir_path;
   char path_raw[PATH_MAX];
+  FileStatus err = {0};
+  const char *to_resolve = dir_path;
 
-  if(dir_path[0] == '\0') {
-    perror("The supplied directory was empty.\n");
-    return -1;
-  }
-
-  if (dir_path[0] == '/') return file_write_path_to_buf(dir_path, "", out);
-
+  if (dir_path[0] == '/') {/* Nothing to do */ }
   if (dir_path[0] == '~') {
-    if (file_tilde_expand(path_ptr, path_raw) < 0) {
-      fprintf(stderr, "Cannot expand '~' for path %s.\n", dir_path);
-      return -1;
-    }
-  }
-  else if (dir_path[0] == '.' || dir_path[0] != '/') {
-      if (file_relative_expand(dir_path, path_raw) != 0) {
-        fprintf(stderr, "Cannot expand relative path for path %s.\n", dir_path);
-        return -1;
-      }
+    err = file_tilde_expand(dir_path, path_raw);
+    to_resolve = path_raw;
+  } 
+  else if (dir_path[0] != '/') {
+    err = file_relative_expand(dir_path, path_raw);
+    to_resolve = path_raw;
   }
 
-  // dir creation is handled downstream so it is safe to egnore ENOENT
-  if (realpath(path_raw, out) == NULL && errno != ENOENT) {
-    perror("realpath");
-    return -1;
-  }
+  if (err.kind != FILE_OK) return err;
 
-  return 0;
+  if (realpath(to_resolve, out) != NULL) return file_ok();
+
+  int e = errno;
+  if (e != ENOENT) return file_from_errno(errno, path_raw);
+
+  size_t len = strlen(to_resolve);
+  if (len >= PATH_MAX) return file_fail(FILE_ERR_PATH_TOO_LONG, dir_path);
+  memcpy(out, to_resolve, len + 1);
+  return file_from_errno(ENOENT, dir_path);
 }
 
 // invariant: fully qualified path
-int file_dir_create(const CanonicalPath *dir_path) {
+FileStatus file_dir_create(const CanonicalPath *dir_path) {
   assert(dir_path);
 
   char path_to_create[PATH_MAX];
@@ -167,66 +189,62 @@ int file_dir_create(const CanonicalPath *dir_path) {
   while (slash != NULL) {
     *slash = '\0';
     int mkdir_res = mkdir(path_to_create, 0755);
+    int e = errno;
+
     *slash = '/';
-
-    if (mkdir_res != 0 && errno != EEXIST) {
-      perror("mkdir");
-      return -1;
-    }
-
+    if (mkdir_res != 0 && e != EEXIST) return file_from_errno(e, dir_path->s);
     slash = strchr(slash + 1, '/');
   }
 
   if (mkdir(path_to_create, 0755) != 0 && errno != EEXIST) {
-    perror("mkdir");
-    return -1;
+    return file_from_errno(errno, dir_path->s);
   }
 
-  return 0;
+  return file_ok();
 }
 
-int file_dir_open(const CanonicalPath *dir_path, int *dir_fd) {
+FileStatus file_dir_open(const CanonicalPath *dir_path, int *dir_fd) {
+  assert(dir_path && dir_fd);
+
   *dir_fd = open(dir_path->s, O_PATH | O_CLOEXEC | O_DIRECTORY);
-
-  if (*dir_fd == -1) {
-    int errsv = errno;
-    printf("Error opening %s: ", dir_path->s);
-    strerror(errsv);
-    printf("%s\n", strerror(errsv));
-    file_err_show(errsv, dir_path->s);
-    return -1;
-  }
-
-  return 0;
+  if (*dir_fd != 0) return file_from_errno(errno, dir_path->s);
+  return file_ok();
 }
 
-int file_dir_stat(const int dir_fd, dev_t *st_dev) {
+FileStatus file_dir_stat(const int dir_fd, dev_t *st_dev) {
   struct stat stat_buf;
-  int res = fstat(dir_fd, &stat_buf);
 
-  if (res != 0) {
-    perror("fstat");
-    return res;
-  }
+  int res = fstat(dir_fd, &stat_buf);
+  if (res != 0) return file_from_errno(errno, NULL);
 
   *st_dev = stat_buf.st_dev;
-  return 0;
+  return file_ok();
 }
 
 
-int file_move(const DirHandle *origin, const DirHandle* destination, const char *fname) {
+FileStatus file_move(const DirHandle *origin, const DirHandle* destination, const char *fname) {
+  errno = 0;
   int res = renameat2(origin->fd, fname, destination->fd, fname, RENAME_NOREPLACE);
 
-  if (res == EEXIST) {
+  if (errno == EEXIST) {
     // handle file collision based on a rule in the config; REPLACE | RENAME | NOTHING
   }
 
-  // a moved or deleted file can be ignored
-  if (res != 0 || res != ENOENT) {
-    perror("renameat2");
-    return -1;
-  }
-
-  return 0;
+  // a moved or deleted file is to be ignored
+  if (res == 0 || errno == ENOENT) return file_ok();
+  return file_from_errno(errno, fname);
 }
+
+
+FileStatus file_dir_ensure_open(const CanonicalPath *path, int *fd, dev_t *st_dev) {
+  FileStatus err = file_dir_create(path);
+
+  if (err.kind == FILE_OK) err = file_dir_open(path, fd);
+  else { close(*fd); *fd = -1; }
+
+  if (err.kind == FILE_OK) err = file_dir_stat(*fd, st_dev);
+
+  return err;
+}
+
 

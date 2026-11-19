@@ -1,5 +1,5 @@
 CC := gcc
-CFLAGS := -std=gnu99 -Wall -Wextra -g #-fsanitize=address,undefined
+CFLAGS := -std=gnu99 -Wall -Wextra -Wswitch-enum -g #-fsanitize=address,undefined
 
 DEPFLAGS := -MMD -MP 
 CPPFLAGS := -Iinclude -isystem vendor/tomlc17/src -D_GNU_SOURCE

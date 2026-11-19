@@ -17,7 +17,7 @@
 #include <dirent.h>
 #include "app.h"
 
-static void error_show(const config_error_t config_err) {
+static void error_show(const ConfigStatus config_err) {
   if (config_err.kind != CONFIG_OK) {
     if (config_err.sys_errno != 0) {
       fprintf(stderr, 
@@ -41,7 +41,7 @@ int app_setup(AppCtx *app) {
   CanonicalPath config = {0};
   if (snprintf(config.s, PATH_MAX, "%s/config.toml", config_dir.s) == -1) return -1;
 
-  config_error_t config_err = rules_build(&app->rules, config.s); 
+  ConfigStatus config_err = rules_build(&app->rules, config.s); 
   if (config_err.kind != CONFIG_OK) {
     error_show(config_err);
     return -1;
@@ -56,13 +56,6 @@ void app_destroy(AppCtx *app) {
   if (!app) return;
   rules_deinit(&app->rules);
   app_handles_close(&app->handles);
-}
-
-static int app_file_setup(const CanonicalPath *path, int *fd, dev_t *st_dev) {
-  if (file_dir_create(path) != 0) return -1;
-  if (file_dir_open(path, fd) != 0) return -1;
-  if (file_dir_stat(*fd, st_dev) != 0) return -1;
-  return 0;
 }
 
 int app_handles_open(const Rules *rules, Handles *h) {
@@ -101,7 +94,7 @@ int app_handles_open(const Rules *rules, Handles *h) {
   h->dir_count = rules->dir_count;
   h->dirs = calloc(h->dir_count, sizeof(*h->dirs));
   for (size_t i = 0; i < h->dir_count; i++) {
-    if (app_file_setup(&rules->dir_paths[i], &h->dirs[i].fd, &h->dirs[i].st_dev) != 0) goto fail;
+    if (file_dir_ensure_open(&rules->dir_paths[i], &h->dirs[i].fd, &h->dirs[i].st_dev) != 0) goto fail;
   }
 
   return 0;

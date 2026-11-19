@@ -37,20 +37,20 @@ typedef enum {
   CONFIG_OK = 0,
   CONFIG_MISSING,
   CONFIG_WRONG_TYPE
-} config_parse_err;
+} ConfigStatusType;
 
 typedef struct {
-  config_parse_err kind;
+  ConfigStatusType kind;
   int sys_errno;
   const char *key;
-} config_error_t;
+} ConfigStatus;
 
-config_error_t rules_build(Rules *out, const char *config_path);
+ConfigStatus rules_build(Rules *out, const char *config_path);
 
 void rules_deinit(Rules *out);
 
 ssize_t rules_set_path_find_idx(const Rules *rules, const char *string);
 
-const char* rules_config_strerror(config_parse_err err);
+const char* rules_config_strerror(ConfigStatusType err);
 
 #endif //DIR_WATCHER_RULES_H

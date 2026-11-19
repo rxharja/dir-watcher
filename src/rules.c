@@ -14,22 +14,22 @@
 #include <fnmatch.h>
 #include <config.h>
 
-static config_error_t err_init() {
-  return (config_error_t) {
+static config_status_t err_init() {
+  return (config_status_t) {
     .kind = CONFIG_NOT_PROCESSED,
     .key = NULL,
     .sys_errno = 0
   };
 }
 
-static config_error_t config_type_check(const toml_type_t type, const toml_type_t expected, const char *key) {
-  if (type  == TOML_UNKNOWN) return (config_error_t){CONFIG_MISSING, 0, key};
-  if (type != expected) return (config_error_t){CONFIG_WRONG_TYPE, 0, key};
-  return (config_error_t){CONFIG_OK, 0, NULL};
+static config_status_t config_type_check(const toml_type_t type, const toml_type_t expected, const char *key) {
+  if (type  == TOML_UNKNOWN) return (config_status_t){CONFIG_MISSING, 0, key};
+  if (type != expected) return (config_status_t){CONFIG_WRONG_TYPE, 0, key};
+  return (config_status_t){CONFIG_OK, 0, NULL};
 }
 
-static config_error_t config_get(const toml_datum_t datum, const char *key, const toml_type_t expected, toml_datum_t *out) {
-  config_error_t err = err_init();
+static config_status_t config_get(const toml_datum_t datum, const char *key, const toml_type_t expected, toml_datum_t *out) {
+  config_status_t err = err_init();
   const toml_datum_t d = toml_seek(datum, key);
   err = config_type_check(d.type, expected, key); 
   if (err.kind != CONFIG_OK) return err;
@@ -37,7 +37,7 @@ static config_error_t config_get(const toml_datum_t datum, const char *key, cons
   return err;
 }
 
-const char* rules_config_strerror(const config_parse_err err) {
+const char* rules_config_strerror(const ConfigParseStatus err) {
   switch (err) {
     case CONFIG_OK:         return "ok";
     case CONFIG_MISSING:    return "missing";
@@ -71,12 +71,12 @@ ssize_t rules_set_path_find_idx(const Rules *rules, const char *string) {
   return CONFIG_IGNORE_IDX;
 }
 
-static config_error_t rules_watch_build(Rules *out, const toml_result_t *result) {
+static config_status_t rules_watch_build(Rules *out, const toml_result_t *result) {
   assert(out);
   assert(result);
 
   toml_datum_t config_watch_tables;
-  config_error_t err = err_init();
+  config_status_t err = err_init();
 
   err = config_get(result->toptab, "watch", TOML_ARRAY, &config_watch_tables);
   if (err.kind != CONFIG_OK) goto fail;
@@ -133,11 +133,11 @@ fail:
     return err;
 }
 
-static config_error_t rules_dest_build(Rules *out, const toml_result_t *result) {
+static config_status_t rules_dest_build(Rules *out, const toml_result_t *result) {
   assert(out);
   assert(result);
 
-  config_error_t err = err_init();
+  config_status_t err = err_init();
   toml_datum_t default_path;
   err = config_get(result->toptab, CONFIG_DEFAULTS_DEST_PATH, TOML_STRING, &default_path);
   if (err.kind != CONFIG_OK) goto fail;
@@ -193,10 +193,10 @@ fail:
   return err;
 }
 
-config_error_t rules_build(Rules *out, const char *config_path) {
+config_status_t rules_build(Rules *out, const char *config_path) {
     assert(out);
     assert(config_path);
-    config_error_t err = err_init();
+    config_status_t err = err_init();
 
     const toml_result_t result = toml_parse_file_ex(config_path);
     if (!result.ok) {
