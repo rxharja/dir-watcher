@@ -224,7 +224,9 @@ AppStatus app_watch_timer_handle(const AppCtx *app, size_t idx) {
     AppStatus res = app_file_move(app, &app->handles.watched[idx], fname);
 
     if (res.kind == APP_FILE && res.u.file.kind == FILE_ERR_NOT_FOUND) {/* nothing to do */}
-    else if (res.kind == APP_FILE && res.u.file.kind == FILE_ERR_EXISTS) {/* apply rename */}
+    else if (res.kind == APP_FILE && res.u.file.kind == FILE_ERR_EXISTS) {
+      app_status_show(res);
+    }
     else if (res.kind != APP_OK) app_status_show(res);
     free(namelist[i]);
   }
