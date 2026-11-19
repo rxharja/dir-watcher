@@ -205,7 +205,7 @@ FileStatus file_dir_open(const CanonicalPath *dir_path, int *dir_fd) {
   assert(dir_path && dir_fd);
 
   *dir_fd = open(dir_path->s, O_PATH | O_CLOEXEC | O_DIRECTORY);
-  if (*dir_fd != 0) return file_from_errno(errno, dir_path->s);
+  if (*dir_fd == -1) return file_from_errno(errno, dir_path->s);
   return file_ok();
 }
 
