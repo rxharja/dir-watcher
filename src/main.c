@@ -15,29 +15,7 @@
 #include <errno.h>
 #include "app.h"
 
-ssize_t signal_setup() {
-  sigset_t mask;
-  sigemptyset(&mask);
-  sigaddset(&mask, SIGINT);
-  sigaddset(&mask, SIGTERM);
-
-  if (sigprocmask(SIG_BLOCK, &mask, NULL) == -1) {
-    perror("sigprocmask");
-    return -1;
-  }
-
-  int sig_fd = signalfd(-1, &mask, SFD_CLOEXEC | SFD_NONBLOCK);
-
-  if (sig_fd == -1) {
-    perror("signalfd");
-    return -1;
-  }
-
-  return sig_fd;
-}
-
 int main(void) {
-  int err_no = 0;
   AppCtx app = {0};
 
   int poll_num;
@@ -45,13 +23,20 @@ int main(void) {
   struct signalfd_siginfo fdsi;
   ssize_t signal_size;
 
-  if ((err_no = app_setup(&app)) != 0) goto fail;
+  struct pollfd *fds = NULL;
+  AppStatus res = app_setup(&app);
+  if (res.kind != APP_OK) goto fail;
+
   app_watched_dirs_show(&app);
 
   nfds_t nfds = 2 + app.rules.watch_path_count; // app.rules.watch_path_count;
-  struct pollfd *fds = calloc(nfds, sizeof(fds[0]));
+  fds = calloc(nfds, sizeof(fds[0]));
+  if (!fds) { 
+    perror("calloc");
+    goto fail; 
+  }
 
-  if ((fds[0].fd = signal_setup()) == -1) goto fail; // signal input
+  fds[0].fd = app.handles.signal_fd;
   fds[0].events = POLLIN;
 
   fds[1].fd = app.handles.inotify_fd; // inotify input
@@ -103,12 +88,11 @@ int main(void) {
 
   printf("Listening for events stopped.\n");
   app_destroy(&app);
-  free(fds);
+  if (fds) free(fds);
   exit(EXIT_SUCCESS);
 
 fail:
-  err(err_no, "Something went wrong.\n");
-  app_destroy(&app);
-  free(fds);
+  app_status_show(res);
+  if (fds) free(fds);
   exit(EXIT_FAILURE);
 }

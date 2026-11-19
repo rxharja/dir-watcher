@@ -2,13 +2,16 @@
 #include "rules.h"
 #include <assert.h>
 #include <bits/time.h>
+#include <err.h>
 #include <errno.h>
 #include <linux/limits.h>
+#include <signal.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/inotify.h>
+#include <sys/signalfd.h>
 #include <sys/timerfd.h>
 #include <sys/types.h>
 #include <time.h>
@@ -17,39 +20,139 @@
 #include <dirent.h>
 #include "app.h"
 
-static void error_show(const ConfigStatus config_err) {
-  if (config_err.kind != CONFIG_OK) {
-    if (config_err.sys_errno != 0) {
-      fprintf(stderr, 
-          "A system error occurred while parsing the config: %s\n",
-          strerror(config_err.sys_errno));
-    }
-    else {
-      fprintf(stderr, 
-          "An error happened while parsing the config: %s\n",
-          rules_config_strerror(config_err.kind));
-    }
+static AppStatus app_status_from_config(ConfigStatus config) {
+  if (config.kind == CONFIG_OK) return (AppStatus) {.kind = APP_OK };
+  return (AppStatus) { .kind = APP_CONFIG, .u.config = config };
+}
+
+static AppStatus app_status_from_file(FileStatus file) {
+  if (file.kind == FILE_OK) return (AppStatus) {.kind = APP_OK };
+  return (AppStatus) { .kind = APP_FILE, .u.file = file };
+}
+
+static AppStatus app_status_from_errno(int err_no, char *context) {
+  return (AppStatus) { .kind = APP_SYSTEM, .sys_errno = err_no, .context = context };
+}
+
+static AppStatus app_status_ok(void) { return (AppStatus) {.kind = APP_OK }; }
+
+void app_status_show(AppStatus s) {
+  switch (s.kind) {
+    case APP_OK: break;
+    case APP_CONFIG:                     
+     config_status_show(s.u.config); 
+     break;
+    case APP_FILE:                           
+     file_status_show(s.u.file); 
+     break;
+    case APP_SYSTEM: 
+     fprintf(stderr, "%s: %s\n", s.context, strerror(s.sys_errno));
+     break;
   }
 }
 
-int app_setup(AppCtx *app) {
-  assert(app);
+static AppStatus app_signal_setup(int *fd) {
+  sigset_t mask;
+  sigemptyset(&mask);
+  sigaddset(&mask, SIGINT);
+  sigaddset(&mask, SIGTERM);
+  if (sigprocmask(SIG_BLOCK, &mask, NULL) == -1) return app_status_from_errno(errno, "sigprocmask failed");
 
-  CanonicalPath config_dir = {0};
-  if (file_config_dir_get(&config_dir) != 0) return -1;
+  *fd = signalfd(-1, &mask, SFD_CLOEXEC | SFD_NONBLOCK);
+  if (*fd == -1) return app_status_from_errno(errno, "no signal file descriptor");
 
-  CanonicalPath config = {0};
-  if (snprintf(config.s, PATH_MAX, "%s/config.toml", config_dir.s) == -1) return -1;
+  return app_status_ok();
+}
 
-  ConfigStatus config_err = rules_build(&app->rules, config.s); 
-  if (config_err.kind != CONFIG_OK) {
-    error_show(config_err);
-    return -1;
+static void app_handles_reset(Handles *h) {
+  h->inotify_fd = -1;
+  h->signal_fd = -1;
+  h->watched = NULL; h->watched_count = 0;
+  h->dirs    = NULL; h->dir_count = 0;
+}
+
+
+static void app_try_close(const int *fd) { if (*fd >= 0) close(*fd); }
+static void app_handles_close(Handles *h) {
+  if (h->watched) {
+    for (size_t i = 0; i < h->watched_count; i++) {
+      app_try_close(&h->watched[i].td);
+      app_try_close(&h->watched[i].dir.fd);
+    }
   }
 
-  if (app_handles_open(&app->rules, &app->handles) != 0) return 1;
+  if (h->dirs) {
+    for (size_t i = 0; i < h->dir_count; i++) app_try_close(&h->dirs[i].fd); 
+  }
 
-  return 0;
+  app_try_close(&h->inotify_fd);
+  app_try_close(&h->signal_fd);
+
+  free(h->watched);
+  free(h->dirs);
+
+  app_handles_reset(h);
+}
+
+static AppStatus app_watch_timer_create(int *fd) {
+  *fd = -1;
+  *fd = timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC | TFD_NONBLOCK);
+  if (*fd == -1) return app_status_from_errno(errno, "creating the timer");
+  return app_status_ok();
+}
+
+static AppStatus app_handles_open_watched(int inotify_fd, const WatchedPath *watch_path, WatchedDirHandle *watched) {
+  assert(watch_path && watched);
+  uint32_t flags = IN_CLOSE_WRITE | IN_MOVED_TO | IN_MODIFY;
+
+  watched->dir.fd = -1; 
+  watched->wd = -1; 
+  watched->td = -1; 
+
+  FileStatus file_status = file_dir_ensure_open(&watch_path->path, &watched->dir.fd, &watched->dir.st_dev);
+  if (file_status.kind != FILE_OK) return app_status_from_file(file_status);
+
+  watched->wd = inotify_add_watch(inotify_fd, watch_path->path.s, flags);
+  if (watched->wd == -1) return app_status_from_errno(errno, "add watch"); 
+
+  return app_watch_timer_create(&watched->td);
+}
+
+static AppStatus app_handles_open(const Rules *rules, Handles *h) {
+  assert(rules && h);
+
+  AppStatus signal_res = app_signal_setup(&h->signal_fd);
+  if (signal_res.kind != APP_OK) return signal_res;
+
+  h->inotify_fd = inotify_init1(IN_CLOEXEC | IN_NONBLOCK);
+  if (h->inotify_fd == -1) return app_status_from_errno(errno, "start file watcher"); 
+
+  h->watched = calloc(rules->watch_path_count, sizeof(*h->watched));
+  if (!h->watched) return app_status_from_errno(errno, "allocate watch list"); 
+  h->watched_count = rules->watch_path_count;
+
+  for (size_t i = 0; i < h->watched_count; i++) {
+    h->watched[i].wd = -1; 
+    h->watched[i].td = -1; 
+    h->watched[i].dir.fd = -1; 
+  }
+
+  for (size_t i = 0; i < h->watched_count; i++) {
+    AppStatus res = app_handles_open_watched(h->inotify_fd, &rules->watch_paths[i], &h->watched[i]);
+    if (res.kind != APP_OK) return res;
+  }
+
+  h->dirs = calloc(rules->dir_count, sizeof(*h->dirs));
+  if (!h->dirs) return app_status_from_errno(errno, "allocate dir list"); 
+  h->dir_count = rules->dir_count;
+
+  for (size_t i = 0; i < h->dir_count; i++) h->dirs[i].fd = -1;
+  for (size_t i = 0; i < h->dir_count; i++) {
+    FileStatus file_res = file_dir_ensure_open(&rules->dir_paths[i], &h->dirs[i].fd, &h->dirs[i].st_dev);
+    if (file_res.kind != FILE_OK) return app_status_from_file(file_res);
+  }
+
+  return app_status_ok();
 }
 
 void app_destroy(AppCtx *app) {
@@ -58,125 +161,77 @@ void app_destroy(AppCtx *app) {
   app_handles_close(&app->handles);
 }
 
-int app_handles_open(const Rules *rules, Handles *h) {
-  h->inotify_fd = inotify_init1(IN_CLOEXEC | IN_NONBLOCK);
-  if (h->inotify_fd == -1) {
-    perror("inotify_init1");
-    return -1;
-  }
-
-  h->watched_count = rules->watch_path_count;
-  h->watched = calloc(h->watched_count, sizeof(*h->watched));
-  if (!h->watched) {
-    perror("calloc");
-    goto fail;
-  }
-
-  uint32_t flags = IN_CLOSE_WRITE | IN_MOVED_TO | IN_MODIFY;
-
-  for (size_t i = 0; i < h->watched_count; i++) {
-    h->watched[i].wd = inotify_add_watch(h->inotify_fd, rules->watch_paths[i].path.s, flags);
-    if (app_file_setup(&rules->watch_paths[i].path, &h->watched[i].dir.fd, &h->watched[i].dir.st_dev) != 0) goto fail;
-
-    if (h->watched[i].wd == -1) {
-      fprintf(stderr, "Cannot watch '%s': %s\n", rules->watch_paths[i].path.s, strerror(errno));
-      goto fail;
-    }
-
-    h->watched[i].td = app_watch_timer_create(rules->watch_paths[i].settle_sec);
-
-    if (h->watched[i].td == -1) {
-      fprintf(stderr, "Cannot set up timer for '%s': %s\n", rules->watch_paths[i].path.s, strerror(errno));
-      goto fail;
-    }
-  }
-
-  h->dir_count = rules->dir_count;
-  h->dirs = calloc(h->dir_count, sizeof(*h->dirs));
-  for (size_t i = 0; i < h->dir_count; i++) {
-    if (file_dir_ensure_open(&rules->dir_paths[i], &h->dirs[i].fd, &h->dirs[i].st_dev) != 0) goto fail;
-  }
-
-  return 0;
-
-fail:
-  app_handles_close(h);
-  return -1;
-}
-
-void app_handles_close(const Handles *h) {
-  for (size_t i = 0; i < h->watched_count; i++) {
-    close(h->watched[i].td);
-    close(h->watched[i].wd);
-    close(h->watched[i].dir.fd);
-  }
-
-  for (size_t i = 0; i < h->dir_count; i++) {
-    close(h->dirs[i].fd); 
-  }
-
-  close(h->inotify_fd);
-  close(h->signal_fd);
-
-  free(h->watched);
-  free(h->dirs);
-}
-
-int app_file_move(const AppCtx *app, const WatchedDirHandle *origin, const char *fname) {
+AppStatus app_setup(AppCtx *app) {
   assert(app);
-  assert(origin);
-  assert(fname);
+
+  app_handles_reset(&app->handles);
+  CanonicalPath config = {0};
+  AppStatus status = app_status_from_file(file_config_path_get(&config));
+  if (status.kind == APP_OK) status = app_status_from_config(rules_build(&app->rules, config.s));
+  if (status.kind == APP_OK) status = app_handles_open(&app->rules, &app->handles);
+  if (status.kind != APP_OK) app_destroy(app);
+  return status;
+}
+
+AppStatus app_file_move(const AppCtx *app, const WatchedDirHandle *origin, const char *fname) {
+  assert(app && origin && fname);
 
   ssize_t idx = rules_set_path_find_idx(&app->rules, fname);
-  if (idx == CONFIG_IGNORE_IDX) return 0;
-  return file_move(&origin->dir, &app->handles.dirs[idx], fname);
+  if (idx == CONFIG_IGNORE_IDX) return app_status_ok();
+
+  return app_status_from_file(file_move(&origin->dir, &app->handles.dirs[idx], fname));
 }
 
 void app_watched_dirs_show(const AppCtx *app) {
-  assert(app);
-  assert(app->rules.watch_paths);
+  assert(app && app->rules.watch_paths);
 
   for (size_t i = 0; i < app->rules.watch_path_count; i++) {
     printf("Watching: %s/\n", app->rules.watch_paths[i].path.s);
   }
 }
 
-int app_watch_timer_arm(const AppCtx *ctx, size_t idx) {
+AppStatus app_watch_timer_arm(const AppCtx *ctx, size_t idx) {
+  assert(ctx);
+
   struct itimerspec timer_spec = {0};
   timer_spec.it_value.tv_sec = ctx->rules.watch_paths[idx].settle_sec;
 
-  if (timerfd_settime(ctx->handles.watched[idx].td, 0, &timer_spec, NULL) == -1) {
-    perror("timerfd_settime");
-    return -1;
-  } 
+  int res = timerfd_settime(ctx->handles.watched[idx].td, 0, &timer_spec, NULL);
+  if (res == -1) return app_status_from_errno(errno, "arming the timer");
 
-  return 0;
+  return app_status_ok();
 }
 
-int app_watch_timer_handle(const AppCtx *app, size_t idx) {
-  uint64_t exp;
-  ssize_t s = read(app->handles.watched[idx].td, &exp, sizeof(exp));
+AppStatus app_watch_timer_handle(const AppCtx *app, size_t idx) {
+  uint64_t expirations;
+  ssize_t s = read(app->handles.watched[idx].td, &expirations, sizeof(expirations));
+  if (s == -1 && errno == EAGAIN) return app_status_ok();
+  if (s == -1) return app_status_from_errno(errno, "reading from the timer file descriptor");
 
-  if (s != sizeof(exp)) {
-    perror("read");
-    return -1;
-  }
+  assert(s == sizeof(expirations));
 
   struct dirent **namelist;
   ssize_t entries = scandirat(app->handles.watched[idx].dir.fd, ".", &namelist, NULL, alphasort); 
-  if (entries == -1) {
-    perror("scandir");
-    return -1;
-  }
+  if (entries == -1) return app_status_from_errno(errno, "generating entries with scandirat");
 
-  while (entries--) {
-    app_file_move(app, &app->handles.watched[idx], namelist[entries]->d_name);
-    free(namelist[entries]);
+  for (ssize_t i = 0; i < entries; i++) {
+    char *fname = namelist[i]->d_name;
+    if (strcmp(fname, ".") == 0 || strcmp(fname, "..") == 0) {
+      free(namelist[i]);
+      continue;
+    }
+
+    AppStatus res = app_file_move(app, &app->handles.watched[idx], fname);
+
+    if (res.kind == APP_FILE && res.u.file.kind == FILE_ERR_NOT_FOUND) {/* nothing to do */}
+    else if (res.kind == APP_FILE && res.u.file.kind == FILE_ERR_EXISTS) {/* apply rename */}
+    else if (res.kind != APP_OK) app_status_show(res);
+    free(namelist[i]);
   }
 
   free(namelist);
 
-  return 0;
+  return app_status_ok();
 }
 
 void app_events_handle(const AppCtx *app) {
@@ -219,21 +274,10 @@ void app_events_handle(const AppCtx *app) {
         for (size_t i = 0; i < app->rules.watch_path_count; ++i) {
           if (app->handles.watched[i].wd == event->wd && event->len) {
             app_watch_timer_arm(app, i); // arm the timer on IN_MODIFY | IN_CLOSE_WRITE | IN_MOVED_TO
-            // app_file_move(app, &app->handles.watched[i], event->name);
             break;
           }
         }
       }
     }
   }
-}
-
-int app_watch_timer_create() {
-  int fd = timerfd_create(CLOCK_MONOTONIC, TFD_CLOEXEC | TFD_NONBLOCK);
-  if (fd == -1) {
-    perror("timerfd_create");
-    return -1;
-  }
-
-  return fd;
 }

@@ -44,26 +44,26 @@ const char *file_streerror(const FileStatusType kind) {
   }
 }
 
-void file_err_show(const int errsv, const char * dir_path) {
-  switch (errsv) {
-    case ENOTDIR: // config mistake, dir isn't a dir
-      printf("%s is not a directory.\n", dir_path);
-      break;
-    case EACCES: // no search (execute) permissions on path
-      printf("Dir Watcher does not have access to %s.\n", dir_path);
-      break;
-    case ELOOP: // symlink loop in path
-      printf("There is a symlink loop in the path %s.\n", dir_path);
-      break;
-    case ENAMETOOLONG: // path name exceeds 4096
-      printf("%s exceeds the 4096 character limit for filepaths.\n", dir_path);
-      break;
-    case EMFILE: // out of fd's 
-      printf("%s could not be added because the system is out of file descriptors.\n", dir_path);
+static char *file_status_kind_show(FileStatusType kind) {
+  switch (kind) {
+    case FILE_OK: break;
+    case FILE_ERR_PATH_EMPTY: return "Empty Path";
+    case FILE_ERR_PATH_MALFORMED: return "Malformed Path";
+    case FILE_ERR_PATH_TOO_LONG: return "Path too long";
+    case FILE_ERR_NO_HOME: return "No Home Directory";
+    case FILE_ERR_NOT_FOUND: return "Not Found";
+    case FILE_ERR_EXISTS: return "File Exists";
+    case FILE_ERR_SYSTEM: return "System Error";
   }
+  return "";
 }
 
-static FileStatus file_write_path_to_buf(const char *part1, const char *part2, char* out) {
+void file_status_show(FileStatus s) {
+  fprintf(stderr, "%s: %s", s.path, file_status_kind_show(s.kind));
+  s.sys_errno != 0 ? fprintf(stderr, " %s\n", strerror(s.sys_errno)) : fprintf(stderr, "\n");
+}
+
+FileStatus file_path_cat(const char *part1, const char *part2, char* out) {
   assert(part1 && part2 && out);
 
   size_t len = strlen(part1);
@@ -102,8 +102,7 @@ static FileStatus file_tilde_expand(const char *dir_path, char *out) {
 
   const char *home;
   FileStatus err = file_home_dir_get(&home);
-
-  if (err.kind == FILE_OK) file_write_path_to_buf(home, dir_path + 1, out);
+  if (err.kind == FILE_OK) err = file_path_cat(home, dir_path + 1, out);
   if (err.kind != FILE_OK) err.path = dir_path;
 
   return err;
@@ -116,11 +115,11 @@ FileStatus file_config_dir_get(CanonicalPath *out) {
   FileStatus err = {0};
 
   const char *xdg = getenv("XDG_CONFIG_HOME");
-  if (xdg && xdg[0] == '/') err = file_write_path_to_buf(xdg, "dir-watcher", app_dir);
+  if (xdg && xdg[0] == '/') err = file_path_cat(xdg, "dir-watcher", app_dir);
   else {
     const char *home;
     err = file_home_dir_get(&home);
-    if (err.kind == FILE_OK) err = file_write_path_to_buf(home, ".config/dir-watcher", app_dir);
+    if (err.kind == FILE_OK) err = file_path_cat(home, ".config/dir-watcher", app_dir);
   }
 
   if (err.kind == FILE_OK) err = file_normalize(app_dir, out->s);
@@ -136,7 +135,7 @@ static FileStatus file_relative_expand(const char *dir_path, char *out) {
   FileStatus err = file_config_dir_get(&config_path);
 
   if (err.kind == FILE_OK || err.kind == FILE_ERR_NOT_FOUND) {
-    err = file_write_path_to_buf(config_path.s, dir_path, out);
+    err = file_path_cat(config_path.s, dir_path, out);
   }
   if (err.kind != FILE_OK) err.path = dir_path;
 
@@ -149,7 +148,6 @@ FileStatus file_normalize(const char *dir_path, char *out) {
 
   if (dir_path[0] == '\0') return file_fail(FILE_ERR_PATH_EMPTY, dir_path);
 
-  const char *path_ptr = dir_path;
   char path_raw[PATH_MAX];
   FileStatus err = {0};
   const char *to_resolve = dir_path;
@@ -247,4 +245,9 @@ FileStatus file_dir_ensure_open(const CanonicalPath *path, int *fd, dev_t *st_de
   return err;
 }
 
-
+FileStatus file_config_path_get(CanonicalPath *out) {
+  CanonicalPath config_dir;
+  FileStatus status = file_config_dir_get(&config_dir);
+  if (status.kind == FILE_OK) status = file_path_cat(config_dir.s, "config.toml", out->s);
+  return status;
+}

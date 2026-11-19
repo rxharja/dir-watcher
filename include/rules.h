@@ -36,13 +36,20 @@ typedef enum {
   CONFIG_NOT_PROCESSED = -1,
   CONFIG_OK = 0,
   CONFIG_MISSING,
-  CONFIG_WRONG_TYPE
+  CONFIG_WRONG_TYPE,
+  CONFIG_MAX_RULES,
+  CONFIG_PATTERN_LENGTH,
+  CONFIG_PARSE,
+  CONFIG_BAD_PATH,
+  CONFIG_SYSTEM_ERR,
 } ConfigStatusType;
 
 typedef struct {
   ConfigStatusType kind;
   int sys_errno;
   const char *key;
+  char err_msg[200];
+  FileStatus file;
 } ConfigStatus;
 
 ConfigStatus rules_build(Rules *out, const char *config_path);
@@ -51,6 +58,8 @@ void rules_deinit(Rules *out);
 
 ssize_t rules_set_path_find_idx(const Rules *rules, const char *string);
 
-const char* rules_config_strerror(ConfigStatusType err);
+const char* config_type_show(ConfigStatusType err);
+
+void config_status_show(ConfigStatus s);
 
 #endif //DIR_WATCHER_RULES_H

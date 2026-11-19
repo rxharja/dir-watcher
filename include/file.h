@@ -63,8 +63,16 @@ FileStatus file_move(const DirHandle *origin, const DirHandle* destination, cons
 __attribute__((warn_unused_result))
 FileStatus file_config_dir_get(CanonicalPath *out);
 
-
+__attribute__((warn_unused_result))
 FileStatus file_dir_ensure_open(const CanonicalPath *path, int *fd, dev_t *st_dev);
 
-void file_err_show(const int errsv, const char * dir_path);
+__attribute__((warn_unused_result))
+FileStatus file_path_cat(const char *part1, const char *part2, char* out);
+
+__attribute__((warn_unused_result))
+FileStatus file_config_path_get(CanonicalPath *out);
+
+void file_status_show(FileStatus s);
+
+
 #endif // !FILE_H

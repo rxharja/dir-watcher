@@ -4,6 +4,23 @@
 #include "file.h"
 #include "rules.h"
 
+typedef enum {
+  APP_OK = 0,
+  APP_CONFIG,
+  APP_FILE,
+  APP_SYSTEM
+} AppStatusType;
+
+typedef struct {
+  AppStatusType kind;
+  int sys_errno;
+  union {
+    ConfigStatus config;
+    FileStatus file;
+  } u;
+  const char *context;
+} AppStatus;
+
 typedef struct {
   int inotify_fd;
   int signal_fd;
@@ -20,23 +37,19 @@ typedef struct {
   Handles handles; 
 } AppCtx;
 
-int app_handles_open(const Rules* rules, Handles *out);
-
-void app_handles_close(const Handles *h);
-
-int app_setup(AppCtx *app);
+AppStatus app_setup(AppCtx *app);
 
 void app_destroy(AppCtx *app);
 
-int app_file_move(const AppCtx *app, const WatchedDirHandle *origin, const char *fname);
+AppStatus app_file_move(const AppCtx *app, const WatchedDirHandle *origin, const char *fname);
 
 void app_watched_dirs_show(const AppCtx *app);
 
 void app_events_handle(const AppCtx *app);
 
+AppStatus app_watch_timer_handle(const AppCtx *app, size_t idx);
 
-int app_watch_timer_create();
+AppStatus app_watch_timer_arm(const AppCtx *ctx, size_t idx);
 
-int app_watch_timer_handle(const AppCtx *app, size_t idx);
-
+void app_status_show(AppStatus s);
 #endif
