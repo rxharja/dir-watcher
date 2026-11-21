@@ -92,6 +92,10 @@ const char* config_type_show(ConfigStatusType err);
 
 void config_status_show(ConfigStatus s);
 
-ConfigStatus config_watch_path(const Config *cfg, const Watch *watch, CanonicalPath *out);
+const CanonicalPath *config_watch_path(const Config *cfg, const Watch *watch);
+
+const CanonicalPath *config_rule_dest(const Config *cfg, const Rule *rule);
+
+const char *config_pattern_by_idx(const Config *cfg, size_t pattern_idx);
 
 #endif //DIR_WATCHER_RULES_H

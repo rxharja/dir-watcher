@@ -43,7 +43,7 @@ int main(void) {
   fds[1].events = POLLIN;
 
   for (size_t i = 0; i < app.config.watch_count; i++) {
-    fds[2 + i].fd = app.handles.watched[i].td; // timer
+    fds[2 + i].fd = app.handles.watches[i].td; // timer
     fds[2 + i].events = POLLIN; // can call read
   }
 

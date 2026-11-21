@@ -25,8 +25,8 @@ typedef struct {
   int inotify_fd;
   int signal_fd;
 
-  WatchedDirHandle *watched; 
-  size_t watched_count;
+  WatchHandle *watches; 
+  size_t watch_count;
 
   DirHandle *dirs;
   size_t dir_count;
@@ -41,7 +41,7 @@ AppStatus app_setup(AppCtx *app);
 
 void app_destroy(AppCtx *app);
 
-AppStatus app_file_move(const AppCtx *app, const WatchedDirHandle *origin, const char *fname);
+AppStatus app_file_move(const AppCtx *app, const WatchHandle *origin, const char *fname);
 
 void app_watched_dirs_show(const AppCtx *app);
 
