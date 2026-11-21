@@ -233,6 +233,16 @@ FileStatus file_move(const DirHandle *origin, const DirHandle* destination, cons
   return file_from_errno(errno, fname);
 }
 
+FileStatus file_delete(const DirHandle *origin, const char *fname) {
+  errno = 0;
+  int res = unlinkat(origin->fd, fname, 0);
+
+  // a moved or deleted file is to be ignored
+  if (res == 0 || errno == ENOENT) return file_ok();
+
+  return file_from_errno(errno, fname);
+}
+
 
 FileStatus file_dir_ensure_open(const CanonicalPath *path, int *fd, dev_t *st_dev) {
   FileStatus err = file_dir_create(path);

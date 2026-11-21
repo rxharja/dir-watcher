@@ -2,6 +2,8 @@ version = 1
 
 dry_run = false
 
+exclude = ["*.pdf"]
+
 [[rule]]
 action = "move"
 destination = "~/notes"
@@ -14,6 +16,7 @@ match = ["*:Zone.Identifier"]
 [[watch]]
 path = "~/"
 settle_seconds = 2
+exclude = ["*.env"]
 
 [[watch]]
 path = "~/Downloads"
@@ -23,6 +26,7 @@ settle_seconds = 2
   action = "move"
   destination = "~/Documents"
   match = ["*.pdf", "*.docx", "*.odt"]
+  exclude = ["invoce-*.pdf"]
 
   [[watch.rule]]
   action = "move"

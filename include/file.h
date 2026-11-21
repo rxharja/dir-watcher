@@ -60,6 +60,9 @@ __attribute__((warn_unused_result))
 FileStatus file_move(const DirHandle *origin, const DirHandle* destination, const char *fname);
 
 __attribute__((warn_unused_result))
+FileStatus file_delete(const DirHandle *origin, const char *fname);
+
+__attribute__((warn_unused_result))
 FileStatus file_config_dir_get(CanonicalPath *out);
 
 __attribute__((warn_unused_result))

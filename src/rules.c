@@ -18,7 +18,7 @@
 #include <config.h>
 #include <stdarg.h>
 
-static ParsePair action_pairs[] = {{"move", MOVE}, {"delete", DELETE}, {"ignore", IGNORE}, {NULL, 0}};
+static ParsePair action_pairs[] = {{"move", MOVE}, {"delete", DELETE}, {NULL, 0}};
 
 static ParsePair conflict_pairs[] = {{"rename", RENAME}, {"skip", SKIP}, {"replace", REPLACE}, {NULL, 0}};
 
@@ -43,9 +43,9 @@ static ConfigStatus config_status_from_file(FileStatus file, const char *key) {
 }
 
 static ConfigStatus config_type_check(const toml_type_t type, const toml_type_t expected, const char *key) {
-  if (type  == TOML_UNKNOWN) return (ConfigStatus){CONFIG_MISSING, 0, key, ""};
-  if (type != expected) return (ConfigStatus){CONFIG_WRONG_TYPE, 0, key, ""};
-  return (ConfigStatus){CONFIG_OK, 0, NULL, ""};
+  if (type  == TOML_UNKNOWN) return (ConfigStatus){CONFIG_MISSING, 0, key, "", {0}};
+  if (type != expected) return (ConfigStatus){CONFIG_WRONG_TYPE, 0, key, "", {0}};
+  return (ConfigStatus){CONFIG_OK, 0, NULL, "", {0}};
 }
 
 static ConfigStatus config_get(const toml_datum_t datum, const char *key, const toml_type_t expected, toml_datum_t *out) {
@@ -61,15 +61,6 @@ static ConfigStatus config_get_int(toml_datum_t table, const char *key, uint64_t
   if (status.kind != CONFIG_OK) return status;
   *out = val.u.int64;
   return config_status_ok();
-}
-
-static ConfigStatus config_get_int_or(toml_datum_t table, const char *key, uint64_t *out, int or) {
-  ConfigStatus status = config_get_int(table, key, out);
-  if (status.kind == CONFIG_MISSING) {
-    *out = or;
-    return config_status_ok();
-  }
-  return status;
 }
 
 static ConfigStatus config_get_bool_or(toml_datum_t table, const char *key, int *out, int or) {
@@ -101,7 +92,7 @@ const CanonicalPath *config_rule_dest(const Config *cfg, const Rule *rule) {
   assert(cfg);
   assert(cfg->paths);
   assert(rule);
-  assert(rule->destination_idx < cfg->path_count);
+  assert(rule->destination_idx < (ssize_t)cfg->path_count);
   return &cfg->paths[rule->destination_idx];
 }
 
@@ -121,6 +112,9 @@ const char* config_type_show(const ConfigStatusType err) {
     case CONFIG_MAX_RULES:      return "Maximum rules exceeded";
     case CONFIG_PATTERN_LENGTH: return "config pattern too long";
     case CONFIG_SYSTEM_ERR:     return "system error";
+    case CONFIG_INVALID_VAL:    return "invalid value in key";
+    case CONFIG_PARSE:          return "unable to parse";
+    case CONFIG_FILE:           return "file system error";
     default:                    return "unkown error";
   }
 }
@@ -155,6 +149,49 @@ static ConfigStatus config_enum_or(toml_datum_t table, const char *key, const Pa
     return config_status_ok();
   }
   return status;
+}
+
+static ssize_t config_rule_pattern_match(const Config *cfg, const Rule *r, const char *fname) {
+  for (size_t i = r->pattern_start; i < r->pattern_start + r->pattern_count; i++) {
+    if (fnmatch(cfg->patterns[i], fname, FNM_PERIOD) == 0) return i;
+  }
+
+  return -1;
+}
+
+static Rule *config_rule_match(const Config *cfg, size_t start, size_t count, const char *fname) {
+  for (size_t i = start; i < start + count; i++) {
+    Rule *r = &cfg->rules[i];
+    if (config_rule_pattern_match(cfg, r, fname) != -1) return r;
+  }
+
+  return NULL;
+}
+
+static int config_exclude(const Config *cfg, const size_t start, const size_t count, const char *fname) {
+  for (size_t i = start; i < start + count; i++) {
+    if (fnmatch(cfg->patterns[i], fname, 0) == 0) return 0;
+  }
+
+  return 1;
+}
+
+const Rule *config_watch_rule_match(const Config *cfg, const Watch *w, const char *fname) {
+  // global exclude check
+  if (config_exclude(cfg, 0, cfg->exclude_count, fname) == 0) return NULL;
+
+  // scoped watch exclude check
+  if (config_exclude(cfg, w->exclude_start, w->exclude_count, fname) == 0) return NULL;
+
+  // retrieve a matched rule from a watch and if it is not excluded, return it
+  Rule *r = config_rule_match(cfg, w->rule_start, w->rule_count, fname);
+  if (r && config_exclude(cfg, r->exclude_start, r->exclude_count, fname) != 0) return r; 
+
+  // retrieve a matched rule from the global rules and if it is not excluded, return it
+  r = config_rule_match(cfg, 0, cfg->global_rule_count, fname);
+  if (r && config_exclude(cfg, r->exclude_start, r->exclude_count, fname) != 0) return r; 
+
+  return NULL;
 }
 
 static void *config_realloc(void *arr, size_t new_count, size_t elem_size) {
@@ -225,17 +262,42 @@ static ConfigStatus config_watch_append(Config *cfg, const Watch *watch) {
   return config_status_ok();
 }
 
+static ConfigStatus config_exclude_parse(const toml_datum_t tab, Config *cfg, size_t *count) {
+  toml_datum_t ignore_list;
+  ConfigStatus status = config_get(tab, CONFIG_EXCLUDE, TOML_ARRAY, &ignore_list);
+  if (status.kind == CONFIG_MISSING) return config_status_ok();
+  else if (status.kind != CONFIG_OK) return status;
+  size_t pattern_start = cfg->pattern_count;
+  
+  for (int i = 0; i < ignore_list.u.arr.size; i++) {
+    toml_datum_t ignore = ignore_list.u.arr.elem[i];
+    if (ignore.type != TOML_STRING) {
+      return config_status_failf(CONFIG_INVALID_VAL, CONFIG_EXCLUDE, "'%s'", ignore.u.s);
+    }
+
+    status = config_pattern_append(cfg, ignore.u.s);
+    if (status.kind != CONFIG_OK) return status;
+  }
+
+  *count = cfg->pattern_count - pattern_start;
+  return config_status_ok();
+}
+
+
 static ConfigStatus config_rules_parse(Config *cfg, toml_datum_t parent) {
   assert(cfg);
 
   ConfigStatus status = config_status_ok();
 
-  for (size_t i = 0; i < parent.u.arr.size; i++) {
+  for (int i = 0; i < parent.u.arr.size; i++) {
     Rule rule = {0};
     int action, conflict;
     toml_datum_t matches;
     const char *path;
     toml_datum_t table = parent.u.arr.elem[i];
+
+    rule.exclude_start = cfg->pattern_count;
+    if (status.kind == CONFIG_OK) status = config_exclude_parse(table, cfg, &rule.exclude_count);
 
     if (status.kind == CONFIG_OK) status = config_enum_parse(table, CONFIG_RULE_ACTION, action_pairs, &action);
     if (status.kind != CONFIG_OK) return status;
@@ -261,7 +323,7 @@ static ConfigStatus config_rules_parse(Config *cfg, toml_datum_t parent) {
     // loop through matches
     rule.pattern_start = cfg->pattern_count;
 
-    for (size_t i = 0; i < matches.u.arr.size; i++) {
+    for (int i = 0; i < matches.u.arr.size; i++) {
       toml_datum_t match = matches.u.arr.elem[i];
       if (match.type != TOML_STRING) {
         return config_status_failf(CONFIG_INVALID_VAL, CONFIG_RULE_MATCH, "'%s'", match.u.s);
@@ -286,12 +348,14 @@ static ConfigStatus config_watches_parse(Config *cfg, toml_datum_t watches) {
   const char *path;
   ConfigStatus status = config_status_ok();
 
-  for (size_t i = 0; i < watches.u.arr.size; i++) {
+  for (int i = 0; i < watches.u.arr.size; i++) {
     toml_datum_t table = watches.u.arr.elem[i];
     // watch rules are optional
     if (status.kind == CONFIG_OK) status = config_get_string(table,  CONFIG_WATCH_PATH, &path);
     if (status.kind == CONFIG_OK) status = config_path_intern(cfg, CONFIG_WATCH_PATH, path, &watch.path_idx);
     if (status.kind == CONFIG_OK) status = config_get_int(table, CONFIG_WATCH_SETTLE_SEC, &watch.settle_sec);
+    if (status.kind == CONFIG_OK) watch.exclude_start = cfg->pattern_count;
+    if (status.kind == CONFIG_OK) status = config_exclude_parse(table, cfg, &watch.exclude_count);
     if (status.kind == CONFIG_OK) watch.rule_start = cfg->total_rule_count;
     if (status.kind == CONFIG_OK) status = config_get(table, CONFIG_RULE, TOML_ARRAY, &rules);
     if (status.kind == CONFIG_OK) status = config_rules_parse(cfg, rules);
@@ -312,11 +376,10 @@ static ConfigStatus config_parse(Config *cfg, const toml_result_t *result) {
 
                 ConfigStatus err = config_get_int(result->toptab, CONFIG_VERSION, &cfg->version); 
   if (err.kind == CONFIG_OK) err = config_get_bool_or(result->toptab, CONFIG_DRY_RUN, &cfg->dry_run, 0); 
-
+  if (err.kind == CONFIG_OK) err = config_exclude_parse(result->toptab, cfg, &cfg->exclude_count);
   if (err.kind == CONFIG_OK) err = config_get(result->toptab, CONFIG_RULE, TOML_ARRAY, &rules); 
   if (err.kind == CONFIG_OK) err = config_rules_parse(cfg, rules); 
   if (err.kind == CONFIG_OK) cfg->global_rule_count = cfg->total_rule_count;
-
   if (err.kind == CONFIG_OK) err = config_get(result->toptab, CONFIG_WATCH, TOML_ARRAY, &watches); 
   if (err.kind == CONFIG_OK) err = config_watches_parse(cfg, watches);                                  
   return err;
@@ -328,6 +391,7 @@ static void config_reset(Config *cfg) {
   cfg->path_count        = 0;
   cfg->pattern_count     = 0;
   cfg->watch_count       = 0;
+  cfg->exclude_count     = 0;
   cfg->rules          = NULL; 
   cfg->paths          = NULL;
   cfg->patterns       = NULL;

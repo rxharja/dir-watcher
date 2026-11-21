@@ -41,7 +41,7 @@ AppStatus app_setup(AppCtx *app);
 
 void app_destroy(AppCtx *app);
 
-AppStatus app_file_move(const AppCtx *app, const WatchHandle *origin, const char *fname);
+AppStatus app_watch_rule_apply(const AppCtx *app, size_t watch_idx, const char *fname);
 
 void app_watched_dirs_show(const AppCtx *app);
 

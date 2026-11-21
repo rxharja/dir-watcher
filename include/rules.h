@@ -11,19 +11,22 @@
 
 #define CONFIG_VERSION "version"
 #define CONFIG_DRY_RUN "dry_run"
+#define CONFIG_EXCLUDE "exclude"
 #define CONFIG_RULE "rule"
 #define CONFIG_RULE_ACTION "action"
 #define CONFIG_RULE_CONFLICT "conflict"
 #define CONFIG_RULE_DEST "destination"
 #define CONFIG_RULE_MATCH "match"
+#define CONFIG_RULE_EXCLUDE "exclude"
 #define CONFIG_WATCH "watch"
+#define CONFIG_WATCH_EXCLUDE "exclude"
 #define CONFIG_WATCH_PATH "path"
 #define CONFIG_WATCH_SETTLE_SEC "settle_seconds"
 #define CONFIG_DRY_RUN "dry_run"
 
 typedef enum { NONE = -1, RENAME = 0, SKIP, REPLACE } ConflictAction;
 
-typedef enum { MOVE = 0, IGNORE, DELETE } RuleAction;
+typedef enum { MOVE = 0, DELETE } RuleAction;
 
 typedef struct {
   RuleAction action; // config error if missing
@@ -31,6 +34,8 @@ typedef struct {
   ssize_t destination_idx; // -1 means no destination for delete
   size_t pattern_start;
   size_t pattern_count;
+  size_t exclude_start;
+  size_t exclude_count;
 } Rule;
 
 typedef struct {
@@ -38,6 +43,8 @@ typedef struct {
   size_t path_idx;
   size_t rule_start;
   size_t rule_count;
+  size_t exclude_start;
+  size_t exclude_count;
 } Watch;
 
 typedef struct {
@@ -56,6 +63,8 @@ typedef struct {
 
   size_t pattern_count;
   char **patterns;
+
+  size_t exclude_count; // the first N patterns where N can be 0 are excludes
 } Config;
 
 typedef struct { 
@@ -97,5 +106,7 @@ const CanonicalPath *config_watch_path(const Config *cfg, const Watch *watch);
 const CanonicalPath *config_rule_dest(const Config *cfg, const Rule *rule);
 
 const char *config_pattern_by_idx(const Config *cfg, size_t pattern_idx);
+
+const Rule *config_watch_rule_match(const Config *cfg, const Watch *w, const char *fname);
 
 #endif //DIR_WATCHER_RULES_H

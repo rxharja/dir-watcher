@@ -4,6 +4,7 @@
 #include <bits/time.h>
 #include <err.h>
 #include <errno.h>
+#include <fnmatch.h>
 #include <linux/limits.h>
 #include <signal.h>
 #include <stddef.h>
@@ -75,10 +76,7 @@ static void app_handles_reset(Handles *h) {
 static void app_try_close(const int *fd) { if (*fd >= 0) close(*fd); }
 static void app_handles_close(Handles *h) {
   if (h->watches) {
-    for (size_t i = 0; i < h->watch_count; i++) {
-      app_try_close(&h->watches[i].td);
-      app_try_close(&h->watches[i].dir.fd);
-    }
+    for (size_t i = 0; i < h->watch_count; i++) app_try_close(&h->watches[i].td);
   }
 
   if (h->dirs) {
@@ -90,7 +88,6 @@ static void app_handles_close(Handles *h) {
 
   free(h->watches);
   free(h->dirs);
-
   app_handles_reset(h);
 }
 
@@ -101,23 +98,17 @@ static AppStatus app_watch_timer_create(int *fd) {
   return app_status_ok();
 }
 
-static AppStatus app_handles_open_watched(int inotify_fd, const Config *cfg, const Watch *watch_cfg, WatchHandle *watched_handle) {
-  assert(cfg && watch_cfg && watched_handle);
+static AppStatus app_handles_open_watched(int inotify_fd, const Config *cfg, const Watch *w, WatchHandle *h) {
+  assert(cfg && w && h);
+
   uint32_t flags = IN_CLOSE_WRITE | IN_MOVED_TO | IN_MODIFY;
+  *h = (WatchHandle){.wd = -1, .td = -1};
+  const CanonicalPath *path = config_watch_path(cfg, w);
 
-  watched_handle->dir.fd = -1; 
-  watched_handle->wd = -1; 
-  watched_handle->td = -1; 
+  h->wd = inotify_add_watch(inotify_fd, path->s, flags);
+  if (h->wd == -1) return app_status_from_sys(errno, "add watch"); 
 
-  const CanonicalPath *path = config_watch_path(cfg, watch_cfg);
-
-  FileStatus file_status = file_dir_ensure_open(path, &watched_handle->dir.fd, &watched_handle->dir.st_dev);
-  if (file_status.kind != FILE_OK) return app_status_from_file(file_status);
-
-  watched_handle->wd = inotify_add_watch(inotify_fd, path->s, flags);
-  if (watched_handle->wd == -1) return app_status_from_sys(errno, "add watch"); 
-
-  return app_watch_timer_create(&watched_handle->td);
+  return app_watch_timer_create(&h->td);
 }
 
 static AppStatus app_handles_open(const Config *cfg, Handles *h) {
@@ -129,22 +120,7 @@ static AppStatus app_handles_open(const Config *cfg, Handles *h) {
   h->inotify_fd = inotify_init1(IN_CLOEXEC | IN_NONBLOCK);
   if (h->inotify_fd == -1) return app_status_from_sys(errno, "start file watcher"); 
 
-  h->watches = calloc(cfg->watch_count, sizeof(*h->watches));
-  if (!h->watches) return app_status_from_sys(errno, "allocate watch list"); 
-  h->watch_count = cfg->watch_count;
-
-  for (size_t i = 0; i < h->watch_count; i++) {
-    h->watches[i].wd = -1; 
-    h->watches[i].td = -1; 
-    h->watches[i].dir.fd = -1; 
-  }
-
-  for (size_t i = 0; i < h->watch_count; i++) {
-    AppStatus res = app_handles_open_watched(h->inotify_fd, cfg, &cfg->watches[i], &h->watches[i]);
-    if (res.kind != APP_OK) return res;
-  }
-
-  h->dirs = calloc(cfg->total_rule_count, sizeof(*h->dirs));
+  h->dirs = calloc(cfg->path_count, sizeof(*h->dirs));
   if (!h->dirs) return app_status_from_sys(errno, "allocate dir list"); 
   h->dir_count = cfg->path_count;
 
@@ -152,6 +128,16 @@ static AppStatus app_handles_open(const Config *cfg, Handles *h) {
   for (size_t i = 0; i < h->dir_count; i++) {
     FileStatus file_res = file_dir_ensure_open(&cfg->paths[i], &h->dirs[i].fd, &h->dirs[i].st_dev);
     if (file_res.kind != FILE_OK) return app_status_from_file(file_res);
+  }
+
+  h->watches = calloc(cfg->watch_count, sizeof(*h->watches));
+  if (!h->watches) return app_status_from_sys(errno, "allocate watch list"); 
+  h->watch_count = cfg->watch_count;
+
+  for (size_t i = 0; i < h->watch_count; i++) h->watches[i] = (WatchHandle){.td = -1, .wd = -1 };
+  for (size_t i = 0; i < h->watch_count; i++) {
+    AppStatus res = app_handles_open_watched(h->inotify_fd, cfg, &cfg->watches[i], &h->watches[i]);
+    if (res.kind != APP_OK) return res;
   }
 
   return app_status_ok();
@@ -175,13 +161,26 @@ AppStatus app_setup(AppCtx *app) {
   return status;
 }
 
-AppStatus app_file_move(const AppCtx *app, const WatchHandle *origin, const char *fname) {
-  assert(app && origin && fname);
+AppStatus app_watch_rule_apply(const AppCtx *app, size_t watch_idx, const char *fname) {
+  assert(app && fname);
+  assert(watch_idx < app->config.watch_count);
 
-  ssize_t idx = -1; //rules_set_path_find_idx(&app->config, fname);
-  if (idx == -1) return app_status_ok();
+  Watch *w = &app->config.watches[watch_idx];
+  const Rule *r = config_watch_rule_match(&app->config, w, fname);
+  if (!r) return app_status_ok(); // no rule applies, we are done
 
-  return app_status_from_file(file_move(&origin->dir, &app->handles.dirs[idx], fname));
+  FileStatus e;
+  switch (r->action) {
+    case MOVE:
+      e = file_move(&app->handles.dirs[w->path_idx], &app->handles.dirs[r->destination_idx], fname);
+      break;
+
+    case DELETE:
+      e = file_delete(&app->handles.dirs[w->path_idx], fname);
+      break;
+  }
+
+  return app_status_from_file(e);
 }
 
 void app_watched_dirs_show(const AppCtx *app) {
@@ -213,7 +212,10 @@ AppStatus app_watch_timer_handle(const AppCtx *app, size_t idx) {
   assert(s == sizeof(expirations));
 
   struct dirent **namelist;
-  ssize_t entries = scandirat(app->handles.watches[idx].dir.fd, ".", &namelist, NULL, alphasort); 
+
+  DirHandle *h = &app->handles.dirs[app->config.watches[idx].path_idx];
+
+  ssize_t entries = scandirat(h->fd, ".", &namelist, NULL, alphasort); 
   if (entries == -1) return app_status_from_sys(errno, "generating entries with scandirat");
 
   for (ssize_t i = 0; i < entries; i++) {
@@ -223,7 +225,7 @@ AppStatus app_watch_timer_handle(const AppCtx *app, size_t idx) {
       continue;
     }
 
-    AppStatus res = app_file_move(app, &app->handles.watches[idx], fname);
+    AppStatus res = app_watch_rule_apply(app, idx, fname);
 
     if (res.kind == APP_FILE && res.u.file.kind == FILE_ERR_NOT_FOUND) {/* nothing to do */}
     else if (res.kind == APP_FILE && res.u.file.kind == FILE_ERR_EXISTS) {
@@ -263,7 +265,8 @@ void app_events_handle(const AppCtx *app) {
 
     for (size_t i = 0; i < app->config.watch_count; ++i) {
       if (app->handles.watches[i].wd == event->wd) {
-        printf("%s/", app->config.paths[app->config.watches[i].path_idx].s);
+        const CanonicalPath *path = config_watch_path(&app->config, &app->config.watches[i]);
+        printf("%s/", path->s);
         break;
       }
     }
