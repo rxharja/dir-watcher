@@ -122,7 +122,7 @@ FileStatus file_config_dir_get(CanonicalPath *out) {
     if (err.kind == FILE_OK) err = file_path_cat(home, ".config/dir-watcher", app_dir);
   }
 
-  if (err.kind == FILE_OK) err = file_normalize(app_dir, out->s);
+  if (err.kind == FILE_OK) err = file_normalize(app_dir, out);
   if (err.kind != FILE_OK) err.path = "config direcotry";
   return err;
 }
@@ -143,12 +143,12 @@ static FileStatus file_relative_expand(const char *dir_path, char *out) {
 }
 
 __attribute__((warn_unused_result))
-FileStatus file_normalize(const char *dir_path, char *out) {
+FileStatus file_normalize(const char *dir_path, CanonicalPath *out) {
   assert(dir_path && out);
 
   if (dir_path[0] == '\0') return file_fail(FILE_ERR_PATH_EMPTY, dir_path);
 
-  char path_raw[PATH_MAX];
+  char path_raw[sizeof(out->s)];
   FileStatus err = {0};
   const char *to_resolve = dir_path;
 
@@ -164,13 +164,13 @@ FileStatus file_normalize(const char *dir_path, char *out) {
 
   if (err.kind != FILE_OK) return err;
 
-  if (realpath(to_resolve, out) != NULL) return file_ok();
+  if (realpath(to_resolve, out->s) != NULL) return file_ok();
 
   int e = errno;
   if (e != ENOENT) return file_from_errno(errno, path_raw);
 
   size_t len = strlen(to_resolve);
-  if (len >= PATH_MAX) return file_fail(FILE_ERR_PATH_TOO_LONG, dir_path);
+  if (len >= sizeof(out->s)) return file_fail(FILE_ERR_PATH_TOO_LONG, dir_path);
   memcpy(out, to_resolve, len + 1);
   return file_from_errno(ENOENT, dir_path);
 }

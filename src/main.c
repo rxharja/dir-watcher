@@ -29,7 +29,7 @@ int main(void) {
 
   app_watched_dirs_show(&app);
 
-  nfds_t nfds = 2 + app.rules.watch_path_count; // app.rules.watch_path_count;
+  nfds_t nfds = 2 + app.config.watch_count; // app.rules.watch_path_count;
   fds = calloc(nfds, sizeof(fds[0]));
   if (!fds) { 
     perror("calloc");
@@ -42,7 +42,7 @@ int main(void) {
   fds[1].fd = app.handles.inotify_fd; // inotify input
   fds[1].events = POLLIN;
 
-  for (size_t i = 0; i < app.rules.watch_path_count; i++) {
+  for (size_t i = 0; i < app.config.watch_count; i++) {
     fds[2 + i].fd = app.handles.watched[i].td; // timer
     fds[2 + i].events = POLLIN; // can call read
   }

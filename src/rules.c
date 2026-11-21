@@ -6,6 +6,8 @@
 #include "file.h"
 #include <inttypes.h>
 #include <linux/limits.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <string.h>
 #include <tomlc17.h>
 #include <assert.h>
@@ -14,17 +16,48 @@
 #include <stdlib.h>
 #include <fnmatch.h>
 #include <config.h>
+#include <stdarg.h>
 
-static ConfigStatus config_status_ok(void) {
-  return (ConfigStatus) { .kind = CONFIG_OK };
-}
+static ParsePair action_pairs[] = { 
+  { "move",   MOVE }, 
+  { "delete", DELETE }, 
+  { "ignore", IGNORE }, 
+  { NULL,     0 } 
+};
 
-static ConfigStatus config_status_build(ConfigStatusType kind, int sys_errno, const char *key) {
+static ParsePair conflict_pairs[] = { 
+  { "rename",  RENAME }, 
+  { "skip",    SKIP }, 
+  { "replace", REPLACE }, 
+  {NULL,       0 } 
+};
+
+static ConfigStatus config_status_ok(void) { return (ConfigStatus) { .kind = CONFIG_OK }; }
+
+static ConfigStatus config_status_from_sys(ConfigStatusType kind, int sys_errno, const char *key) {
   return (ConfigStatus) {
     .kind = kind,
     .key = key,
     .sys_errno = sys_errno,
     .err_msg = ""
+  };
+}
+
+__attribute__((format(printf, 3, 4))) 
+static ConfigStatus config_status_failf(ConfigStatusType kind, const char *key, const char *fmt, ...) {
+  ConfigStatus status = (ConfigStatus) { .kind = kind, .key = key };
+  va_list args;
+  va_start(args, fmt);
+  vsnprintf(status.err_msg, sizeof (status.err_msg), fmt, args); 
+  va_end(args);
+  return status;
+}
+
+static ConfigStatus config_status_from_file(FileStatus file, const char *key) {
+  return (ConfigStatus) {
+    .kind = file.kind == FILE_OK ? CONFIG_OK : CONFIG_FILE,
+    .file = file,
+    .key = key,
   };
 }
 
@@ -37,9 +70,49 @@ static ConfigStatus config_type_check(const toml_type_t type, const toml_type_t 
 static ConfigStatus config_get(const toml_datum_t datum, const char *key, const toml_type_t expected, toml_datum_t *out) {
   const toml_datum_t d = toml_seek(datum, key);
   ConfigStatus err = config_type_check(d.type, expected, key); 
-  if (err.kind != CONFIG_OK) return err;
-  *out = d;
+  if (err.kind == CONFIG_OK) *out = d;
   return err;
+}
+
+static ConfigStatus config_get_int(toml_datum_t table, const char *key, uint64_t *out) {
+  toml_datum_t val;
+  ConfigStatus status = config_get(table, key, TOML_INT64, &val);
+  if (status.kind != CONFIG_OK) return status;
+  *out = val.u.int64;
+  return config_status_ok();
+}
+
+static ConfigStatus config_get_int_or(toml_datum_t table, const char *key, uint64_t *out, int or) {
+  ConfigStatus status = config_get_int(table, key, out);
+  if (status.kind == CONFIG_MISSING) {
+    *out = or;
+    return config_status_ok();
+  }
+  return status;
+}
+
+static ConfigStatus config_get_bool_or(toml_datum_t table, const char *key, int *out, int or) {
+  toml_datum_t val;
+  ConfigStatus status = config_get(table, key, TOML_BOOLEAN, &val);
+  if (status.kind != CONFIG_OK && status.kind != CONFIG_MISSING) return status;
+  if (status.kind == CONFIG_MISSING) *out = or;
+  else *out = val.u.boolean;
+  return config_status_ok();
+}
+
+static ConfigStatus config_get_string(toml_datum_t table, const char *key, const char **out) {
+  toml_datum_t val;
+  ConfigStatus status = config_get(table, key, TOML_STRING, &val);
+  if (status.kind != CONFIG_OK) return status;
+  *out = val.u.s;
+  return config_status_ok();
+}
+
+ConfigStatus config_watch_path(const Config *cfg, const Watch *watch, CanonicalPath *out) {
+  assert(cfg && watch);
+  CanonicalPath *path = &cfg->paths[watch->path_idx];
+  if (path) out = path;
+  return config_status_ok();
 }
 
 const char* config_type_show(const ConfigStatusType err) {
@@ -55,177 +128,226 @@ const char* config_type_show(const ConfigStatusType err) {
   }
 }
 
-void rules_reset(Rules *r) {
-  r->dir_paths = NULL; r->dir_count = 0;
-  r->watch_paths = NULL; r->watch_path_count = 0;
-  r->rule_set_count = 0;
-}
-
-static ConfigStatus rules_set_add(Rules *out, const char *match, ssize_t target_idx) {
-  assert(out);
-  assert(match);
-
-  if (out->rule_set_count == MAX_RULES) return config_status_build(CONFIG_MAX_RULES, 0, NULL);
-
-  Rule rule = (Rule){ .target_dir_idx = target_idx };
-  int written = snprintf(rule.match, sizeof(rule.match), "%s", match);
-  if (written != (int)strlen(match)) return config_status_build(CONFIG_PATTERN_LENGTH, 0, NULL);
-
-  out->rule_set[out->rule_set_count++] = rule;
-  return config_status_ok();
-}
-
-ssize_t rules_set_path_find_idx(const Rules *rules, const char *string) {
-  for (size_t i = 0; i < rules->rule_set_count; i++) {
-    Rule rule = rules->rule_set[i];
-    if (fnmatch(rule.match, string, FNM_PERIOD | FNM_CASEFOLD) == 0) {
-      return rule.target_dir_idx;
-    }
-  }
-
-  return CONFIG_IGNORE_IDX;
-}
-
-static ConfigStatus rules_watch_build(Rules *out, const toml_result_t *result) {
-  assert(out);
-  assert(result);
-
-  toml_datum_t config_watch_tables;
-
-  ConfigStatus err = config_get(result->toptab, "watch", TOML_ARRAY, &config_watch_tables);
-  if (err.kind != CONFIG_OK) return err;
-
-  out->watch_paths = calloc(config_watch_tables.u.arr.size, sizeof(out->watch_paths[0]));
-  if(!out->watch_paths) return config_status_build(CONFIG_SYSTEM_ERR, errno, "calloc watch paths");
-  out->watch_path_count = config_watch_tables.u.arr.size;
-
-  for (size_t i = 0; i < out->watch_path_count; i++) {
-    const toml_datum_t watch_table = config_watch_tables.u.arr.elem[i];
-    err = config_type_check(watch_table.type, TOML_TABLE, CONFIG_WATCH_TABLE);
-    if (err.kind != CONFIG_OK) return err;
-
-    toml_datum_t config_watch_path; 
-    err = config_get(watch_table, "path", TOML_STRING, &config_watch_path);
-    if (err.kind != CONFIG_OK) return err;
-
-    FileStatus fs = file_normalize(config_watch_path.u.s, out->watch_paths[i].path.s);
-    if (fs.kind != FILE_OK && fs.kind != FILE_ERR_NOT_FOUND) {
-      err = config_status_build(CONFIG_BAD_PATH, 0, "path");
-      err.file = fs;
-      return err;
-    }
-
-    toml_datum_t config_watch_settle_sec; 
-    err = config_get(watch_table, CONFIG_WATCH_SETTLE_SECONDS, TOML_INT64, &config_watch_settle_sec);
-    if (err.kind == CONFIG_MISSING) out->watch_paths[i].settle_sec = CONFIG_DEFAULT_SETTLE_SECONDS;
-    else if (err.kind == CONFIG_OK) out->watch_paths[i].settle_sec = config_watch_settle_sec.u.int64;
-    else return err;
-
-    // if any ignores exist we can process them here
-    toml_datum_t config_watch_ignores;
-    err = config_get(watch_table, "ignore", TOML_ARRAY, &config_watch_ignores);
-
-    if (err.kind != CONFIG_MISSING && err.kind != CONFIG_OK) return err;
-
-    if (err.kind == CONFIG_OK) {
-      for (int32_t k = 0; k < config_watch_ignores.u.arr.size; k++) {
-        const toml_datum_t ignore = config_watch_ignores.u.arr.elem[k];
-
-        err = config_type_check(ignore.type, TOML_STRING, CONFIG_WATCH_IGNORE);
-        if (err.kind != CONFIG_OK) return err;
-
-        err = rules_set_add(out, ignore.u.s, CONFIG_IGNORE_IDX);
-        err.key = CONFIG_WATCH_IGNORE;
-        if(err.kind != CONFIG_OK) return err;
-      }
-    }
-  }
-
-  return config_status_ok();
-}
-
-static ConfigStatus rules_dest_build(Rules *out, const toml_result_t *result) {
-  assert(out);
-  assert(result);
-
-  toml_datum_t default_path;
-  ConfigStatus err = config_get(result->toptab, CONFIG_DEFAULTS_DEST_PATH, TOML_STRING, &default_path);
-  if (err.kind != CONFIG_OK) return err;
-
-  toml_datum_t config_dest_tables;
-  err = config_get(result->toptab, CONFIG_DEST_TABLE, TOML_ARRAY, &config_dest_tables);
-  if (err.kind != CONFIG_OK) return err;
-
-  // N dest dirs and 1 default
-  out->dir_paths = calloc(config_dest_tables.u.arr.size, sizeof(CanonicalPath));
-  if(!out->dir_paths) return config_status_build(CONFIG_SYSTEM_ERR, errno, "calloc");
-  out->dir_count = config_dest_tables.u.arr.size;
-
-  for (size_t i = 0; i < out->dir_count; i++) {
-    const toml_datum_t dest_table = config_dest_tables.u.arr.elem[i];
-    err = config_type_check(dest_table.type, TOML_TABLE, CONFIG_DEST_TABLE);
-    if (err.kind != CONFIG_OK) return err;
-
-    toml_datum_t config_dest_path; 
-    err = config_get(dest_table, "path", TOML_STRING, &config_dest_path);
-    if (err.kind != CONFIG_OK) return err;
-
-    FileStatus fs = file_normalize(config_dest_path.u.s, out->dir_paths[i].s);
-    if (fs.kind != FILE_OK && fs.kind != FILE_ERR_NOT_FOUND) {
-      err = config_status_build(CONFIG_BAD_PATH, 0, "path");
-      err.file = fs;
-      return err;
-    }
-
-    toml_datum_t config_dest_targets;
-    err = config_get(dest_table, CONFIG_DEST_EXTENSIONS, TOML_ARRAY, &config_dest_targets);
-    if (err.kind != CONFIG_OK) return err;
-
-    for (int32_t j = 0; j < config_dest_targets.u.arr.size; j++) {
-      const toml_datum_t targets = config_dest_targets.u.arr.elem[j];
-      err = config_type_check(targets.type, TOML_STRING, CONFIG_DEST_EXTENSIONS);
-      if (err.kind != CONFIG_OK) return err;
-
-      err = rules_set_add(out, targets.u.s, i);
-      err.key = CONFIG_DEST_EXTENSIONS;
-      if (err.kind != CONFIG_OK) return err;
-    }
-  }
-
-  return config_status_ok();
-}
-
-ConfigStatus rules_build(Rules *out, const char *config_path) {
-    assert(out);
-    assert(config_path);
-
-    rules_reset(out);
-
-    const toml_result_t result = toml_parse_file_ex(config_path);
-
-    if (!result.ok) {
-      ConfigStatus status = config_status_build(CONFIG_PARSE, 0, NULL);
-      snprintf(status.err_msg, sizeof (status.err_msg), "%s", result.errmsg);
-      return status;
-    }
-
-    ConfigStatus err = rules_watch_build(out, &result); 
-    if (err.kind == CONFIG_OK) err = rules_dest_build(out, &result); 
-    if (err.kind != CONFIG_OK) rules_deinit(out);
-
-    toml_free(result);
-    return err;
-}
-
 void config_status_show(ConfigStatus s) {
   fprintf(stderr, "config: %s: %s", s.key, config_type_show(s.kind));
   s.sys_errno != 0 ? fprintf(stderr, " %s\n", strerror(s.sys_errno)) : fprintf(stderr, "\n");
 }
 
-void rules_deinit(Rules *rules) {
-  if (!rules) return;
-  if (rules->dir_paths) free(rules->dir_paths);
-  if (rules->watch_paths) free(rules->watch_paths);
-  rules_reset(rules);
+static ConfigStatus config_enum_parse(toml_datum_t table, const char *key, const ParsePair *names, int *out) {
+  const char *s;
+  ConfigStatus err = config_get_string(table, key, &s);
+  if (err.kind != CONFIG_OK) return err;
+
+  const ParsePair *p = names;
+  while (p->name != NULL) {
+    if (strcmp(s, p->name) == 0) {
+      *out = p->value;
+      return config_status_ok();
+    }
+
+    p++;
+  }
+
+  return config_status_failf(CONFIG_INVALID_VAL, key, "'%s'", s);
 }
 
+static ConfigStatus config_enum_or(toml_datum_t table, const char *key, const ParsePair *names, int *out, int or) {
+  ConfigStatus status = config_enum_parse(table, key, names, out);
+  if (status.kind == CONFIG_MISSING) {
+    *out = or; 
+    return config_status_ok();
+  }
+  return status;
+}
+
+static void *config_realloc(void *arr, size_t new_count, size_t elem_size) {
+  assert(elem_size > 0);
+
+  if (new_count > SIZE_MAX / elem_size) {
+    errno = ENOMEM;
+    return NULL;
+  }
+
+  return realloc(arr, new_count * elem_size);
+}
+
+static ConfigStatus config_path_intern(Config *cfg, const char *key, const char *raw, ssize_t *idx) {
+  assert(cfg && key && raw && idx);
+  CanonicalPath path = {0};
+
+  ConfigStatus status = config_status_from_file(file_normalize(raw, &path), key);
+  if (status.kind != CONFIG_OK) return status;
+
+  for (size_t i = 0; i < cfg->path_count; i++) {
+    if (strcmp(cfg->paths[i].s, path.s) == 0) {
+      *idx = i;
+      return config_status_ok();
+    }
+  }
+
+  void *new_arr = config_realloc(cfg->paths, cfg->path_count + 1, sizeof(path));
+  if (!new_arr) return config_status_from_sys(CONFIG_SYSTEM_ERR, errno, key);
+
+  cfg->paths = new_arr;
+  cfg->paths[cfg->path_count] = path;
+  *idx = cfg->path_count;
+  cfg->path_count++;
+  return config_status_ok();
+}
+
+static ConfigStatus config_pattern_append(Config *cfg, const char *pattern) {
+  char *duped_pattern = strdup(pattern);
+  if (!duped_pattern) return config_status_from_sys(CONFIG_SYSTEM_ERR, errno, CONFIG_RULE_MATCH);
+
+  void *new_arr = config_realloc(cfg->patterns, cfg->pattern_count + 1, sizeof(*cfg->patterns));
+  if (!new_arr) return config_status_from_sys(CONFIG_SYSTEM_ERR, errno, CONFIG_RULE_MATCH);
+
+  cfg->patterns = new_arr;
+  cfg->patterns[cfg->pattern_count] = duped_pattern;
+  cfg->pattern_count++;
+
+  return config_status_ok();
+}
+
+static ConfigStatus config_rule_append(Config *cfg, const Rule *rule) {
+  void *new_arr = config_realloc(cfg->rules, cfg->total_rule_count + 1, sizeof(*cfg->rules));
+  if (!new_arr) return config_status_from_sys(CONFIG_SYSTEM_ERR, errno, CONFIG_RULE_MATCH);
+
+  cfg->rules = new_arr;
+  cfg->rules[cfg->total_rule_count] = *rule;
+  cfg->total_rule_count++;
+
+  return config_status_ok();
+}
+
+static ConfigStatus config_rules_parse(Config *cfg, toml_datum_t parent) {
+  assert(cfg);
+
+  ConfigStatus status = config_status_ok();
+
+  for (size_t i = 0; i < parent.u.arr.size; i++) {
+    Rule rule = {0};
+    int action, conflict;
+    toml_datum_t matches;
+    const char *path;
+    toml_datum_t table = parent.u.arr.elem[i];
+
+    if (status.kind == CONFIG_OK) status = config_enum_parse(table, CONFIG_RULE_ACTION, action_pairs, &action);
+    if (status.kind != CONFIG_OK) return status;
+    rule.action = action;
+
+    if(rule.action == DELETE) {
+      rule.conflict = -1;
+      rule.destination_idx = -1;
+    }
+    else {
+      status = config_enum_or(table, CONFIG_RULE_CONFLICT, conflict_pairs, &conflict, MOVE);
+      if (status.kind != CONFIG_OK) return status;
+      rule.conflict = conflict;
+
+      ConfigStatus err = config_get_string(table, CONFIG_RULE_DEST, &path);
+      if (err.kind == CONFIG_OK) status = config_path_intern(cfg, CONFIG_RULE_DEST, path, &rule.destination_idx);
+      if (status.kind != CONFIG_OK) return status;
+    }
+
+    status = config_get(table, CONFIG_RULE_MATCH, TOML_ARRAY, &matches);
+    if (status.kind != CONFIG_OK) return status;
+
+    // loop through matches
+    rule.pattern_start = cfg->pattern_count;
+
+    for (size_t i = 0; i < matches.u.arr.size; i++) {
+      toml_datum_t match = matches.u.arr.elem[i];
+      if (match.type != TOML_STRING) {
+        return config_status_failf(CONFIG_INVALID_VAL, CONFIG_RULE_MATCH, "'%s'", match.u.s);
+      }
+
+      status = config_pattern_append(cfg, match.u.s);
+      if (status.kind == CONFIG_OK) rule.pattern_count++;
+      else return status;
+    }
+
+    status = config_rule_append(cfg, &rule);
+    
+    if (status.kind != CONFIG_OK) return status;
+  }
+
+  return status;
+}
+
+static ConfigStatus config_watches_parse(Config *cfg, toml_datum_t watches) {
+  assert(cfg);
+  Watch watch = {0};
+  toml_datum_t rules;
+  const char *path;
+  ConfigStatus status = config_status_ok();
+
+  for (size_t i = 0; i < watches.u.arr.size; i++) {
+    toml_datum_t table = watches.u.arr.elem[i];
+    // watch rules are optional
+    if (status.kind == CONFIG_OK) status = config_get_string(table,  CONFIG_WATCH_PATH, &path);
+    if (status.kind == CONFIG_OK) status = config_path_intern(cfg, CONFIG_WATCH_PATH, path, &watch.path_idx);
+    if (status.kind == CONFIG_OK) status = config_get_int(table, CONFIG_WATCH_SETTLE_SEC, &watch.settle_sec);
+    if (status.kind == CONFIG_OK) watch.rule_start = cfg->total_rule_count;
+    if (status.kind == CONFIG_OK) status = config_get(table, "rule", TOML_TABLE, &rules);
+    if (status.kind == CONFIG_OK) status = config_rules_parse(cfg, rules);
+    if (status.kind == CONFIG_MISSING && cfg->global_rule_count > 0) status = config_status_ok(); 
+    if (status.kind == CONFIG_OK) watch.rule_count = cfg->total_rule_count - watch.rule_start;
+    else return status;
+  }
+
+  return status;
+}
+
+static ConfigStatus config_parse(Config *cfg, const toml_result_t *result) {
+  assert(!cfg->rules && cfg->global_rule_count == 0 && cfg->total_rule_count == 0);
+  assert(!cfg->watches && cfg->watch_count == 0);
+
+  toml_datum_t rules, watches;
+
+                ConfigStatus err = config_get_int(result->toptab, CONFIG_VERSION, &cfg->version); 
+  if (err.kind == CONFIG_OK) err = config_get_bool_or(result->toptab, CONFIG_DRY_RUN, &cfg->dry_run, 0); 
+
+  if (err.kind == CONFIG_OK) err = config_get(result->toptab, CONFIG_RULE, TOML_ARRAY, &rules); 
+  if (err.kind == CONFIG_OK) err = config_rules_parse(cfg, rules); 
+  if (err.kind == CONFIG_OK) cfg->global_rule_count = cfg->total_rule_count;
+
+  if (err.kind == CONFIG_OK) err = config_get(result->toptab, CONFIG_WATCH, TOML_ARRAY, &watches); 
+  if (err.kind == CONFIG_OK) err = config_watches_parse(cfg, watches);                                  
+  return err;
+}
+
+static void config_reset(Config *cfg) {
+  cfg->global_rule_count = 0;
+  cfg->total_rule_count  = 0;
+  cfg->path_count        = 0;
+  cfg->pattern_count     = 0;
+  cfg->watch_count       = 0;
+  cfg->rules          = NULL; 
+  cfg->paths          = NULL;
+  cfg->patterns       = NULL;
+  cfg->watches        = NULL;
+}
+
+void config_destroy(Config *cfg) {
+  for (size_t i = 0; i < cfg->pattern_count; i++) {
+    if (cfg->patterns[i]) free(cfg->patterns[i]);
+  }
+  if (cfg->paths)    free(cfg->paths);
+  if (cfg->watches)  free(cfg->watches);
+  if (cfg->rules)    free(cfg->rules);
+  if (cfg->patterns) free(cfg->patterns);
+}
+
+ConfigStatus config_build(Config *cfg, const CanonicalPath *config_path) {
+  config_reset(cfg);
+
+  const toml_result_t result = toml_parse_file_ex(config_path->s);
+  if (!result.ok) return config_status_failf(CONFIG_PARSE, NULL, "%s", result.errmsg);
+
+  ConfigStatus status = config_parse(cfg, &result);
+  if (status.kind != CONFIG_OK) config_destroy(cfg);
+
+  toml_free(result);
+  return status;
+}

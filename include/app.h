@@ -33,7 +33,7 @@ typedef struct {
 } Handles;
 
 typedef struct { 
-  Rules rules;
+  Config config;
   Handles handles; 
 } AppCtx;
 

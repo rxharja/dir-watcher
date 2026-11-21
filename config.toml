@@ -1,29 +1,30 @@
 version = 1
 
-[watch]
-path = "~/Downloads"
-ignore = ["*.part", "*.crdownload", ".*"]
-settle_seconds = 2
-
-[defaults]
-on_conflict = "rename"   # rename | skip | overwrite
 dry_run = false
 
-[[rules]]
-name = "documents"
-match.extensions = ["pdf", "docx", "odt"]
+[[rule]]
 action = "move"
-destination = "~/Documents/Inbox"
+destination = "~/notes"
+match = ["*.md", "*.txt"]
 
-[[rules]]
-name = "invoices"
-match.glob = "invoice-*"
-match.extensions = ["pdf"]
-destination = "~/Documents/Invoices/{year}"
+[[rule]]
+action = "delete"
+match = ["*:Zone.Identifier"]
 
-[[rules]]
-name = "archives"
-enabled = false
-match.extensions = ["zip", "tar.gz"]
-action = "move"
-destination = "~/Archives"
+[[watch]]
+path = "~/"
+settle_seconds = 2
+
+[[watch]]
+path = "~/Downloads"
+settle_seconds = 2
+
+  [[watch.rule]]
+  action = "move"
+  destination = "~/Documents"
+  match = ["*.pdf", "*.docx", "*.odt"]
+
+  [[watch.rule]]
+  action = "move"
+  destination = "~/archives"
+  match = ["*.zip", "*.tar.gz"]

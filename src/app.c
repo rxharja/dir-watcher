@@ -101,25 +101,29 @@ static AppStatus app_watch_timer_create(int *fd) {
   return app_status_ok();
 }
 
-static AppStatus app_handles_open_watched(int inotify_fd, const WatchedPath *watch_path, WatchedDirHandle *watched) {
-  assert(watch_path && watched);
+static AppStatus app_handles_open_watched(int inotify_fd, const Config *cfg, const Watch *watch, WatchedDirHandle *watched) {
+  assert(watch && watched);
   uint32_t flags = IN_CLOSE_WRITE | IN_MOVED_TO | IN_MODIFY;
 
   watched->dir.fd = -1; 
   watched->wd = -1; 
   watched->td = -1; 
 
-  FileStatus file_status = file_dir_ensure_open(&watch_path->path, &watched->dir.fd, &watched->dir.st_dev);
+  CanonicalPath *path;
+  AppStatus app_status = app_status_from_config(config_watch_path(cfg, watch, path));
+  if (app_status.kind != APP_OK) return app_status;
+
+  FileStatus file_status = file_dir_ensure_open(path, &watched->dir.fd, &watched->dir.st_dev);
   if (file_status.kind != FILE_OK) return app_status_from_file(file_status);
 
-  watched->wd = inotify_add_watch(inotify_fd, watch_path->path.s, flags);
+  watched->wd = inotify_add_watch(inotify_fd, path->s, flags);
   if (watched->wd == -1) return app_status_from_errno(errno, "add watch"); 
 
   return app_watch_timer_create(&watched->td);
 }
 
-static AppStatus app_handles_open(const Rules *rules, Handles *h) {
-  assert(rules && h);
+static AppStatus app_handles_open(const Config *cfg, Handles *h) {
+  assert(cfg && h);
 
   AppStatus signal_res = app_signal_setup(&h->signal_fd);
   if (signal_res.kind != APP_OK) return signal_res;
@@ -127,9 +131,9 @@ static AppStatus app_handles_open(const Rules *rules, Handles *h) {
   h->inotify_fd = inotify_init1(IN_CLOEXEC | IN_NONBLOCK);
   if (h->inotify_fd == -1) return app_status_from_errno(errno, "start file watcher"); 
 
-  h->watched = calloc(rules->watch_path_count, sizeof(*h->watched));
+  h->watched = calloc(cfg->watch_count, sizeof(*h->watched));
   if (!h->watched) return app_status_from_errno(errno, "allocate watch list"); 
-  h->watched_count = rules->watch_path_count;
+  h->watched_count = cfg->watch_count;
 
   for (size_t i = 0; i < h->watched_count; i++) {
     h->watched[i].wd = -1; 
@@ -138,17 +142,17 @@ static AppStatus app_handles_open(const Rules *rules, Handles *h) {
   }
 
   for (size_t i = 0; i < h->watched_count; i++) {
-    AppStatus res = app_handles_open_watched(h->inotify_fd, &rules->watch_paths[i], &h->watched[i]);
+    AppStatus res = app_handles_open_watched(h->inotify_fd, cfg, &cfg->watches[i], &h->watched[i]);
     if (res.kind != APP_OK) return res;
   }
 
-  h->dirs = calloc(rules->dir_count, sizeof(*h->dirs));
+  h->dirs = calloc(cfg->path_count, sizeof(*h->dirs));
   if (!h->dirs) return app_status_from_errno(errno, "allocate dir list"); 
-  h->dir_count = rules->dir_count;
+  h->dir_count = cfg->path_count;
 
   for (size_t i = 0; i < h->dir_count; i++) h->dirs[i].fd = -1;
   for (size_t i = 0; i < h->dir_count; i++) {
-    FileStatus file_res = file_dir_ensure_open(&rules->dir_paths[i], &h->dirs[i].fd, &h->dirs[i].st_dev);
+    FileStatus file_res = file_dir_ensure_open(&cfg->paths[i], &h->dirs[i].fd, &h->dirs[i].st_dev);
     if (file_res.kind != FILE_OK) return app_status_from_file(file_res);
   }
 
@@ -157,7 +161,7 @@ static AppStatus app_handles_open(const Rules *rules, Handles *h) {
 
 void app_destroy(AppCtx *app) {
   if (!app) return;
-  rules_deinit(&app->rules);
+  config_destroy(&app->config);
   app_handles_close(&app->handles);
 }
 
@@ -165,10 +169,10 @@ AppStatus app_setup(AppCtx *app) {
   assert(app);
 
   app_handles_reset(&app->handles);
-  CanonicalPath config = {0};
-  AppStatus status = app_status_from_file(file_config_path_get(&config));
-  if (status.kind == APP_OK) status = app_status_from_config(rules_build(&app->rules, config.s));
-  if (status.kind == APP_OK) status = app_handles_open(&app->rules, &app->handles);
+  CanonicalPath config_path = {0};
+  AppStatus status = app_status_from_file(file_config_path_get(&config_path));
+  if (status.kind == APP_OK) status = app_status_from_config(config_build(&app->config, &config_path));
+  if (status.kind == APP_OK) status = app_handles_open(&app->config, &app->handles);
   if (status.kind != APP_OK) app_destroy(app);
   return status;
 }
@@ -176,17 +180,17 @@ AppStatus app_setup(AppCtx *app) {
 AppStatus app_file_move(const AppCtx *app, const WatchedDirHandle *origin, const char *fname) {
   assert(app && origin && fname);
 
-  ssize_t idx = rules_set_path_find_idx(&app->rules, fname);
-  if (idx == CONFIG_IGNORE_IDX) return app_status_ok();
+  ssize_t idx = -1; //rules_set_path_find_idx(&app->config, fname);
+  if (idx == -1) return app_status_ok();
 
   return app_status_from_file(file_move(&origin->dir, &app->handles.dirs[idx], fname));
 }
 
 void app_watched_dirs_show(const AppCtx *app) {
-  assert(app && app->rules.watch_paths);
+  assert(app && app->config.watches);
 
-  for (size_t i = 0; i < app->rules.watch_path_count; i++) {
-    printf("Watching: %s/\n", app->rules.watch_paths[i].path.s);
+  for (size_t i = 0; i < app->config.watch_count; i++) {
+    printf("Watching: %s/\n", app->config.paths[app->config.watches[i].path_idx].s);
   }
 }
 
@@ -194,7 +198,7 @@ AppStatus app_watch_timer_arm(const AppCtx *ctx, size_t idx) {
   assert(ctx);
 
   struct itimerspec timer_spec = {0};
-  timer_spec.it_value.tv_sec = ctx->rules.watch_paths[idx].settle_sec;
+  timer_spec.it_value.tv_sec = ctx->config.watches[idx].settle_sec;
 
   int res = timerfd_settime(ctx->handles.watched[idx].td, 0, &timer_spec, NULL);
   if (res == -1) return app_status_from_errno(errno, "arming the timer");
@@ -259,9 +263,9 @@ void app_events_handle(const AppCtx *app) {
       if (event->mask & IN_MOVED_TO) printf("IN_MOVED_TO: ");
     }
 
-    for (size_t i = 0; i < app->rules.watch_path_count; ++i) {
+    for (size_t i = 0; i < app->config.watch_count; ++i) {
       if (app->handles.watched[i].wd == event->wd) {
-        printf("%s/", app->rules.watch_paths[i].path.s);
+        printf("%s/", app->config.paths[app->config.watches[i].path_idx].s);
         break;
       }
     }
@@ -273,7 +277,7 @@ void app_events_handle(const AppCtx *app) {
     for (char *ptr = buf; ptr < buf + size; ptr += sizeof(struct inotify_event) + event->len) {
       event = (const struct inotify_event*)ptr;
       if (event->mask & (IN_MODIFY | IN_CLOSE_WRITE | IN_MOVED_TO)) {
-        for (size_t i = 0; i < app->rules.watch_path_count; ++i) {
+        for (size_t i = 0; i < app->config.watch_count; ++i) {
           if (app->handles.watched[i].wd == event->wd && event->len) {
             app_watch_timer_arm(app, i); // arm the timer on IN_MODIFY | IN_CLOSE_WRITE | IN_MOVED_TO
             break;

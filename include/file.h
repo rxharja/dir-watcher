@@ -46,7 +46,7 @@ const char *file_streerror(const FileStatusType kind);
 
 // normalize file path -> build a Dir from the file path
 __attribute__((warn_unused_result))
-FileStatus file_normalize(const char *dir_path, char *out);
+FileStatus file_normalize(const char *dir_path, CanonicalPath *out);
 
 __attribute__((warn_unused_result))
 FileStatus file_dir_create(const CanonicalPath *dir_path);

@@ -9,38 +9,70 @@
 #include "config.h"
 #include "file.h"
 
-// +1 so index 0 doesn't encode to NULL (dict_find's "absent" value)
+#define CONFIG_VERSION "version"
+#define CONFIG_DRY_RUN "dry_run"
+#define CONFIG_RULE "rule"
+#define CONFIG_RULE_ACTION "action"
+#define CONFIG_RULE_CONFLICT "conflict"
+#define CONFIG_RULE_DEST "destination"
+#define CONFIG_RULE_MATCH "match"
+#define CONFIG_WATCH "watch"
+#define CONFIG_WATCH_PATH "path"
+#define CONFIG_WATCH_SETTLE_SEC "settle_seconds"
+#define CONFIG_DRY_RUN "dry_run"
+
+typedef enum { NONE = -1, RENAME = 0, SKIP, REPLACE } ConflictAction;
+
+typedef enum { MOVE = 0, IGNORE, DELETE } RuleAction;
 
 typedef struct {
-  ssize_t target_dir_idx; // -1 means exclude
-  char match[1024];
+  RuleAction action; // config error if missing
+  ConflictAction conflict; // resolved at parse, RENAME if unset
+  ssize_t destination_idx; // -1 means no destination for delete
+  size_t pattern_start;
+  size_t pattern_count;
 } Rule;
 
 typedef struct {
   uint64_t settle_sec;
-  CanonicalPath path;
-} WatchedPath;
+  size_t path_idx;
+  size_t rule_start;
+  size_t rule_count;
+} Watch;
 
 typedef struct {
-  size_t dir_count;
-  size_t watch_path_count;
-  size_t rule_set_count;
+  uint64_t version;
+  int dry_run;
 
-  Rule rule_set[MAX_RULES]; 
+  size_t path_count;
+  CanonicalPath *paths; 
 
-  CanonicalPath *dir_paths; // set of target dirs
-  WatchedPath *watch_paths;
-} Rules;
+  size_t total_rule_count; // encompasses the global rules + rules for individual watches
+  size_t global_rule_count; // global rules start at 0 and end with this value
+  Rule *rules; 
+
+  size_t watch_count;
+  Watch *watches; 
+
+  size_t pattern_count;
+  char **patterns;
+} Config;
+
+typedef struct { 
+  const char *name;
+  const int value;
+} ParsePair;
 
 typedef enum {
   CONFIG_NOT_PROCESSED = -1,
   CONFIG_OK = 0,
   CONFIG_MISSING,
   CONFIG_WRONG_TYPE,
+  CONFIG_INVALID_VAL,
   CONFIG_MAX_RULES,
   CONFIG_PATTERN_LENGTH,
   CONFIG_PARSE,
-  CONFIG_BAD_PATH,
+  CONFIG_FILE,
   CONFIG_SYSTEM_ERR,
 } ConfigStatusType;
 
@@ -48,18 +80,18 @@ typedef struct {
   ConfigStatusType kind;
   int sys_errno;
   const char *key;
-  char err_msg[200];
+  char err_msg[256];
   FileStatus file;
 } ConfigStatus;
 
-ConfigStatus rules_build(Rules *out, const char *config_path);
+ConfigStatus config_build(Config *cfg, const CanonicalPath *config_path);
 
-void rules_deinit(Rules *out);
-
-ssize_t rules_set_path_find_idx(const Rules *rules, const char *string);
+void config_destroy(Config *out);
 
 const char* config_type_show(ConfigStatusType err);
 
 void config_status_show(ConfigStatus s);
+
+ConfigStatus config_watch_path(const Config *cfg, const Watch *watch, CanonicalPath *out);
 
 #endif //DIR_WATCHER_RULES_H
