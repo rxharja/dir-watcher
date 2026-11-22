@@ -76,6 +76,28 @@ FileStatus file_path_cat(const char *part1, const char *part2, char* out) {
   return file_ok();
 }
 
+FileStatus file_name_cat(const char *og_name, const char *append, char* out) {
+  assert(og_name && append && out);
+  int n;
+
+  const char *period = strrchr(og_name, '.');
+  if (period) {
+    char fname[PATH_MAX];
+    int written = snprintf(fname, PATH_MAX, "%s", og_name);
+    assert(written >= 0);
+
+    fname[period - og_name] = '\0';
+    n = snprintf(out, PATH_MAX, "%s%s%s", fname, append, period);
+  }
+  else {
+    n = snprintf(out, PATH_MAX, "%s%s", og_name, append);
+    assert( n >= 0);
+  }
+
+  if ((size_t)n >= PATH_MAX) return file_fail(FILE_ERR_PATH_TOO_LONG, NULL);
+  return file_ok();
+}
+
 static FileStatus file_home_dir_get(const char **out) {
   const char *home = getenv("HOME");
   if (home && home[0] == '/') {
@@ -220,17 +242,17 @@ FileStatus file_dir_stat(const int dir_fd, dev_t *st_dev) {
 }
 
 
-FileStatus file_move(const DirHandle *origin, const DirHandle* destination, const char *fname) {
+FileStatus file_move(const DirHandle *origin, const DirHandle* destination, const char *og_name, const char *new_name, int replace) {
   errno = 0;
-  int res = renameat2(origin->fd, fname, destination->fd, fname, RENAME_NOREPLACE);
+  int res = renameat2(origin->fd, og_name, destination->fd, new_name, replace ? 0 : RENAME_NOREPLACE);
 
-  if (errno == EEXIST) {
-    // handle file collision based on a rule in the config; REPLACE | RENAME | NOTHING
-  }
+  // handled upstream by the conflict resolution configuration
+  if (errno == EEXIST) return file_fail(FILE_ERR_EXISTS, og_name);
 
   // a moved or deleted file is to be ignored
   if (res == 0 || errno == ENOENT) return file_ok();
-  return file_from_errno(errno, fname);
+
+  return file_from_errno(errno, og_name);
 }
 
 FileStatus file_delete(const DirHandle *origin, const char *fname) {

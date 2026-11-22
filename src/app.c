@@ -1,5 +1,6 @@
 #include "file.h"
 #include "rules.h"
+#include <asm-generic/errno.h>
 #include <assert.h>
 #include <bits/time.h>
 #include <err.h>
@@ -161,6 +162,25 @@ AppStatus app_setup(AppCtx *app) {
   return status;
 }
 
+AppStatus app_file_move_with_rename(DirHandle *origin, DirHandle *dest, const char *fname) {
+  size_t copy = 1;
+  char copy_buf[256];
+  char new_fname[PATH_MAX];
+  FileStatus f = file_move(origin, dest, fname, fname, 0);
+
+  if (f.kind == FILE_OK) return app_status_from_file(f);
+
+  while (f.kind == FILE_ERR_EXISTS) {
+    int written = snprintf(copy_buf, sizeof(copy_buf), " (%lu)", copy++);
+    assert(written >= 0);
+    if ((size_t)written >= sizeof(copy_buf)) return app_status_from_sys(EOVERFLOW, strerror(EOVERFLOW));
+    if (f.kind == FILE_ERR_EXISTS) f = file_name_cat(fname, copy_buf, new_fname);
+    if (f.kind == FILE_OK) f = file_move(origin, dest, fname, new_fname, 0);
+  }
+
+  return app_status_from_file(f);
+}
+
 AppStatus app_watch_rule_apply(const AppCtx *app, size_t watch_idx, const char *fname) {
   assert(app && fname);
   assert(watch_idx < app->config.watch_count);
@@ -168,19 +188,21 @@ AppStatus app_watch_rule_apply(const AppCtx *app, size_t watch_idx, const char *
   Watch *w = &app->config.watches[watch_idx];
   const Rule *r = config_watch_rule_match(&app->config, w, fname);
   if (!r) return app_status_ok(); // no rule applies, we are done
+  DirHandle *origin = &app->handles.dirs[w->path_idx];
+  DirHandle *dest = &app->handles.dirs[r->destination_idx];
 
-  FileStatus e;
   switch (r->action) {
-    case MOVE:
-      e = file_move(&app->handles.dirs[w->path_idx], &app->handles.dirs[r->destination_idx], fname);
-      break;
-
-    case DELETE:
-      e = file_delete(&app->handles.dirs[w->path_idx], fname);
-      break;
+    case MOVE: 
+      switch (r->conflict) {
+        case NONE:    return app_status_ok();
+        case SKIP:    return app_status_ok();
+        case RENAME:  return app_file_move_with_rename(origin, dest, fname);
+        case REPLACE: return app_status_from_file(file_move(origin, dest, fname, fname, 1));
+        default:      return app_status_from_sys(ENOTSUP, "the conflict is not supported");
+      }
+    case DELETE:      return app_status_from_file(file_delete(origin, fname));
+    default:          return app_status_from_sys(ENOTSUP, "the action is not supported");
   }
-
-  return app_status_from_file(e);
 }
 
 void app_watched_dirs_show(const AppCtx *app) {

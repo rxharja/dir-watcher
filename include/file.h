@@ -56,8 +56,7 @@ FileStatus file_dir_open(const CanonicalPath *dir_path, int *dir_fd);
 __attribute__((warn_unused_result))
 FileStatus file_dir_stat(const int dir_fd, dev_t *st_dev);
 
-__attribute__((warn_unused_result))
-FileStatus file_move(const DirHandle *origin, const DirHandle* destination, const char *fname);
+FileStatus file_move(const DirHandle *origin, const DirHandle* destination, const char *og_name, const char *new_name, int replace);
 
 __attribute__((warn_unused_result))
 FileStatus file_delete(const DirHandle *origin, const char *fname);
@@ -70,6 +69,9 @@ FileStatus file_dir_ensure_open(const CanonicalPath *path, int *fd, dev_t *st_de
 
 __attribute__((warn_unused_result))
 FileStatus file_path_cat(const char *part1, const char *part2, char* out);
+
+__attribute__((warn_unused_result))
+FileStatus file_name_cat(const char *part1, const char *part2, char* out);
 
 __attribute__((warn_unused_result))
 FileStatus file_config_path_get(CanonicalPath *out);
