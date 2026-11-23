@@ -2,6 +2,7 @@
 #define APP_H
 
 #include "file.h"
+#include "log.h"
 #include "rules.h"
 
 typedef enum {
@@ -37,15 +38,41 @@ typedef struct {
   Handles handles; 
 } AppCtx;
 
+typedef struct { 
+  size_t watch_idx;
+  const Rule *rule;
+  const char *fname; // borrowed from the namelist
+} Effect;
+
+typedef enum { 
+  RECEIPT_UNSET = 0, 
+  RECEIPT_MOVED, 
+  RECEIPT_RENAMED,
+  RECEIPT_DELETED,
+  RECEIPT_SKIPPED,
+  RECEIPT_VANISHED,
+  RECEIPT_REPLACED,
+} ReceiptKind;
+
+typedef struct { 
+  ReceiptKind kind;
+  Effect effect;
+  char final_name[NAME_MAX + 1];
+} Receipt;
+
+AppStatus app_effect_run(const AppCtx *app, Effect *e, Receipt *out);
+
+void app_effect_describe(const AppCtx *app, Effect effect, LogLevel level);
+
+void app_outcome_log(Receipt *r);
+
 AppStatus app_setup(AppCtx *app);
 
 void app_destroy(AppCtx *app);
 
-AppStatus app_watch_rule_apply(const AppCtx *app, size_t watch_idx, const char *fname);
+void app_watches_log(const Config *cfg);
 
-void app_watched_dirs_show(const AppCtx *app);
-
-void app_events_handle(const AppCtx *app);
+AppStatus app_events_handle(const AppCtx *app);
 
 AppStatus app_watch_timer_handle(const AppCtx *app, size_t idx);
 

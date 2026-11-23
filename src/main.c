@@ -14,8 +14,10 @@
 #include <sys/signalfd.h>
 #include <errno.h>
 #include "app.h"
+#include "log.h"
 
 int main(void) {
+  if (log_init() != 0) log_warn("unknown DIR_WATCH_LOG value, using info");
   AppCtx app = {0};
 
   int poll_num;
@@ -23,11 +25,12 @@ int main(void) {
   struct signalfd_siginfo fdsi;
   ssize_t signal_size;
 
+
   struct pollfd *fds = NULL;
   AppStatus res = app_setup(&app);
   if (res.kind != APP_OK) goto fail;
 
-  app_watched_dirs_show(&app);
+  app_watches_log(&app.config);
 
   nfds_t nfds = 2 + app.config.watch_count; // app.rules.watch_path_count;
   fds = calloc(nfds, sizeof(fds[0]));

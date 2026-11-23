@@ -7,3 +7,4 @@ vendor/tomlc17/src
 -Wall 
 -Wextra 
 -Wswitch-enum
+-fsanitize=address,undefined

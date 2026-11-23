@@ -145,7 +145,7 @@ FileStatus file_config_dir_get(CanonicalPath *out) {
   }
 
   if (err.kind == FILE_OK) err = file_normalize(app_dir, out);
-  if (err.kind != FILE_OK) err.path = "config direcotry";
+  if (err.kind != FILE_OK) err.path = "config directory";
   return err;
 }
 
@@ -245,23 +245,17 @@ FileStatus file_dir_stat(const int dir_fd, dev_t *st_dev) {
 FileStatus file_move(const DirHandle *origin, const DirHandle* destination, const char *og_name, const char *new_name, int replace) {
   errno = 0;
   int res = renameat2(origin->fd, og_name, destination->fd, new_name, replace ? 0 : RENAME_NOREPLACE);
-
-  // handled upstream by the conflict resolution configuration
   if (errno == EEXIST) return file_fail(FILE_ERR_EXISTS, og_name);
-
-  // a moved or deleted file is to be ignored
-  if (res == 0 || errno == ENOENT) return file_ok();
-
+  if (errno == ENOENT) return file_fail(FILE_ERR_NOT_FOUND, og_name);
+  if (res == 0) return file_ok();
   return file_from_errno(errno, og_name);
 }
 
 FileStatus file_delete(const DirHandle *origin, const char *fname) {
   errno = 0;
   int res = unlinkat(origin->fd, fname, 0);
-
-  // a moved or deleted file is to be ignored
-  if (res == 0 || errno == ENOENT) return file_ok();
-
+  if (errno == ENOENT) return file_fail(FILE_ERR_NOT_FOUND, fname);
+  if (res == 0) return file_ok();
   return file_from_errno(errno, fname);
 }
 

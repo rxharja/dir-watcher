@@ -1,4 +1,5 @@
 #include "file.h"
+#include "log.h"
 #include "rules.h"
 #include <asm-generic/errno.h>
 #include <assert.h>
@@ -162,10 +163,9 @@ AppStatus app_setup(AppCtx *app) {
   return status;
 }
 
-AppStatus app_file_move_with_rename(DirHandle *origin, DirHandle *dest, const char *fname) {
+AppStatus app_file_move_with_rename(DirHandle *origin, DirHandle *dest, const char *fname, char *new_name_out) {
   size_t copy = 1;
   char copy_buf[256];
-  char new_fname[PATH_MAX];
   FileStatus f = file_move(origin, dest, fname, fname, 0);
 
   if (f.kind == FILE_OK) return app_status_from_file(f);
@@ -174,42 +174,19 @@ AppStatus app_file_move_with_rename(DirHandle *origin, DirHandle *dest, const ch
     int written = snprintf(copy_buf, sizeof(copy_buf), " (%lu)", copy++);
     assert(written >= 0);
     if ((size_t)written >= sizeof(copy_buf)) return app_status_from_sys(EOVERFLOW, strerror(EOVERFLOW));
-    if (f.kind == FILE_ERR_EXISTS) f = file_name_cat(fname, copy_buf, new_fname);
-    if (f.kind == FILE_OK) f = file_move(origin, dest, fname, new_fname, 0);
+    if (f.kind == FILE_ERR_EXISTS) f = file_name_cat(fname, copy_buf, new_name_out);
+    if (f.kind == FILE_OK) f = file_move(origin, dest, fname, new_name_out, 0);
   }
 
   return app_status_from_file(f);
 }
 
-AppStatus app_watch_rule_apply(const AppCtx *app, size_t watch_idx, const char *fname) {
-  assert(app && fname);
-  assert(watch_idx < app->config.watch_count);
+void app_watches_log(const Config *cfg) {
+  assert(cfg && cfg->watches);
 
-  Watch *w = &app->config.watches[watch_idx];
-  const Rule *r = config_watch_rule_match(&app->config, w, fname);
-  if (!r) return app_status_ok(); // no rule applies, we are done
-  DirHandle *origin = &app->handles.dirs[w->path_idx];
-  DirHandle *dest = &app->handles.dirs[r->destination_idx];
-
-  switch (r->action) {
-    case MOVE: 
-      switch (r->conflict) {
-        case NONE:    return app_status_ok();
-        case SKIP:    return app_status_ok();
-        case RENAME:  return app_file_move_with_rename(origin, dest, fname);
-        case REPLACE: return app_status_from_file(file_move(origin, dest, fname, fname, 1));
-        default:      return app_status_from_sys(ENOTSUP, "the conflict is not supported");
-      }
-    case DELETE:      return app_status_from_file(file_delete(origin, fname));
-    default:          return app_status_from_sys(ENOTSUP, "the action is not supported");
-  }
-}
-
-void app_watched_dirs_show(const AppCtx *app) {
-  assert(app && app->config.watches);
-
-  for (size_t i = 0; i < app->config.watch_count; i++) {
-    printf("Watching: %s/\n", app->config.paths[app->config.watches[i].path_idx].s);
+  if (cfg->dry_run) log_warn("dry run: no files will be changed");
+  for (size_t i = 0; i < cfg->watch_count; i++) {
+    log_info("Watching %s", config_watch_path(cfg, &cfg->watches[i])->s);
   }
 }
 
@@ -224,6 +201,124 @@ AppStatus app_watch_timer_arm(const AppCtx *ctx, size_t idx) {
 
   return app_status_ok();
 }
+
+static Effect app_effect_plan(const AppCtx *app, size_t watch_idx, const char *fname) {
+  assert(app && fname);
+  assert(watch_idx < app->config.watch_count);
+
+  return (Effect) {
+    .rule = config_watch_rule_match(&app->config, &app->config.watches[watch_idx], fname),
+    .watch_idx = watch_idx,
+    .fname = fname
+  };
+}
+
+void app_effect_describe(const AppCtx *app, Effect effect, LogLevel level) {
+  assert(app);
+
+  const CanonicalPath *origin = config_watch_path(&app->config, &app->config.watches[effect.watch_idx]);
+  assert(origin);
+
+  if (!effect.rule) {
+    log_debug("no rule matched for %s/%s", origin->s, effect.fname);
+    return;
+  }
+
+  const CanonicalPath *dest = config_rule_dest(&app->config, effect.rule);
+  assert(dest);
+
+  switch (effect.rule->action) {
+    case MOVE:
+      switch (effect.rule->conflict) {
+        case RENAME: {
+          char new_fname[NAME_MAX + 1];
+          FileStatus f = file_name_cat(effect.fname, " (N)", new_fname);
+          if (f.kind != FILE_OK) {
+            log_error("could not process new fname for description");
+            break;
+          }
+
+          LOG_AT(level, "moving %s/%s to %s/%s. File will be renamed to '%s/%s' on conflict", 
+              origin->s, effect.fname, 
+              dest->s, effect.fname, 
+              dest->s, new_fname);
+          break;
+        }
+        case REPLACE:
+          LOG_AT(level, "moving %s/%s to %s/%s. File will be replaced on conflict", origin->s, effect.fname, dest->s, effect.fname);
+          break;
+        case NONE:
+        case SKIP:
+          LOG_AT(level, "moving %s/%s to %s/%s. File will be skipped on conflict", origin->s, effect.fname, dest->s, effect.fname);
+          break;
+        default: break;
+      }
+      break;
+    case DELETE: LOG_AT(level, "deleting %s/%s", origin->s, effect.fname); break;
+    default: break;
+  }
+}
+
+AppStatus receipt_from_file(AppStatus status, Receipt *out, const Effect *e, ReceiptKind k, const char *name) {
+  out->effect = *e;
+  snprintf(out->final_name, sizeof(out->final_name), "%s", name);
+  switch (status.kind) {
+    case APP_OK: out->kind = k; break;
+    case APP_FILE: 
+      switch (status.u.file.kind) {
+        case FILE_ERR_NOT_FOUND: {
+          out->kind = RECEIPT_VANISHED;
+          return app_status_ok();
+        }
+
+        case FILE_OK:
+        case FILE_ERR_PATH_EMPTY:
+        case FILE_ERR_PATH_MALFORMED:
+        case FILE_ERR_PATH_TOO_LONG:
+        case FILE_ERR_NO_HOME:
+        case FILE_ERR_EXISTS:
+        case FILE_ERR_SYSTEM:
+          break;
+      }
+      break;
+    case APP_CONFIG:
+    case APP_SYSTEM:
+      break;
+  }
+
+  return status;
+}
+
+AppStatus app_effect_run(const AppCtx *app, Effect *e, Receipt *out) {
+  assert(app);
+  assert(e && e->rule);
+
+  const CanonicalPath *o_path = config_watch_path(&app->config, &app->config.watches[e->watch_idx]);
+  assert(o_path);
+
+  if (!e->rule) return app_status_ok();
+
+  const CanonicalPath *dest = config_rule_dest(&app->config, e->rule);
+  DirHandle *o_handle = &app->handles.dirs[e->watch_idx];
+  DirHandle *dest_handle = &app->handles.dirs[e->rule->destination_idx];
+  assert(dest && o_handle && dest_handle);
+
+  switch (e->rule->action) {
+    case DELETE: return receipt_from_file(app_status_ok(), out, e, RECEIPT_DELETED, "");
+    case MOVE:
+      switch (e->rule->conflict) {
+        case RENAME: return receipt_from_file(
+            app_file_move_with_rename(o_handle, dest_handle, e->fname, out->final_name), 
+            out, e, RECEIPT_RENAMED, out->final_name);
+        case REPLACE: return receipt_from_file(
+            app_status_from_file(file_move(o_handle, dest_handle, e->fname, e->fname, 1)),
+            out, e, RECEIPT_REPLACED, e->fname);
+        case NONE: case SKIP: return receipt_from_file(app_status_ok(), out, e, RECEIPT_SKIPPED, e->fname);
+        default: return app_status_from_sys(ENOTSUP, "the conflict is not supported");
+      }
+    default: return app_status_from_sys(ENOTSUP, "the action is not supported");
+  }
+} 
 
 AppStatus app_watch_timer_handle(const AppCtx *app, size_t idx) {
   uint64_t expirations;
@@ -247,13 +342,15 @@ AppStatus app_watch_timer_handle(const AppCtx *app, size_t idx) {
       continue;
     }
 
-    AppStatus res = app_watch_rule_apply(app, idx, fname);
+    AppStatus res;
+    Receipt receipt = {0};
+    Effect effect = app_effect_plan(app, idx, fname);
+    app_effect_describe(app, effect, app->config.dry_run ? LOG_LEVEL_INFO : LOG_LEVEL_DEBUG);
+    
+    if (app->config.dry_run) res = app_status_ok();
+    else                     res = app_effect_run(app, &effect, &receipt);
 
-    if (res.kind == APP_FILE && res.u.file.kind == FILE_ERR_NOT_FOUND) {/* nothing to do */}
-    else if (res.kind == APP_FILE && res.u.file.kind == FILE_ERR_EXISTS) {
-      app_status_show(res);
-    }
-    else if (res.kind != APP_OK) app_status_show(res);
+    app_status_show(res);
     free(namelist[i]);
   }
 
@@ -262,47 +359,36 @@ AppStatus app_watch_timer_handle(const AppCtx *app, size_t idx) {
   return app_status_ok();
 }
 
-void app_events_handle(const AppCtx *app) {
-  char buf[sizeof(struct inotify_event) + NAME_MAX + 1] __attribute__((aligned(__alignof__(struct inotify_event))));
+AppStatus app_events_handle(const AppCtx *app) {
+  assert(app);
 
+  __attribute__((aligned(__alignof__(struct inotify_event))))
+  char buf[sizeof(struct inotify_event) + NAME_MAX + 1];
   const struct inotify_event *event; 
-
   ssize_t size;
 
   for (;;) {
     size = read(app->handles.inotify_fd, buf, sizeof buf);
-
-    if (size == -1 && errno != EAGAIN) {
-      perror("read");
-      exit(EXIT_FAILURE);
-    }
-
-    if (size <= 0) break;
-
-    for (char *ptr = buf; ptr < buf + size; ptr += sizeof(struct inotify_event) + event->len) {
-      event = (const struct inotify_event*)ptr;
-      if (event->mask & IN_CLOSE_WRITE) printf("IN_CLOSE_WRITE: ");
-      if (event->mask & IN_MOVED_TO) printf("IN_MOVED_TO: ");
-    }
-
-    for (size_t i = 0; i < app->config.watch_count; ++i) {
-      if (app->handles.watches[i].wd == event->wd) {
-        const CanonicalPath *path = config_watch_path(&app->config, &app->config.watches[i]);
-        printf("%s/", path->s);
-        break;
-      }
-    }
-
-    if (event->len) printf("%s", event->name);
-    if (event->mask & IN_ISDIR) printf(" [directory]\n");
-    else printf(" [file]\n");
+    if (size == -1 && errno == EAGAIN) return app_status_ok();
+    if (size == -1 && errno != EAGAIN) return app_status_from_sys(errno, "read from inotify fd");
+    assert(size > 0);
 
     for (char *ptr = buf; ptr < buf + size; ptr += sizeof(struct inotify_event) + event->len) {
       event = (const struct inotify_event*)ptr;
       if (event->mask & (IN_MODIFY | IN_CLOSE_WRITE | IN_MOVED_TO)) {
         for (size_t i = 0; i < app->config.watch_count; ++i) {
           if (app->handles.watches[i].wd == event->wd && event->len) {
-            app_watch_timer_arm(app, i); // arm the timer on IN_MODIFY | IN_CLOSE_WRITE | IN_MOVED_TO
+            const CanonicalPath *path = config_watch_path(&app->config, &app->config.watches[i]);
+            assert(path);
+
+            log_debug("inotify: %s%s%s on %s/%s%s",
+                      (event->mask & IN_MODIFY) ? "IN_MODIFY " : "",
+                      (event->mask & IN_CLOSE_WRITE) ? "IN_CLOSE_WRITE " : "",
+                      (event->mask & IN_MOVED_TO) ? "IN_MOVED_TO " : "", path->s,
+                      event->name, (event->mask & IN_ISDIR) ? " [dir]" : "");
+
+            AppStatus res = app_watch_timer_arm(app, i);
+            if (res.kind != APP_OK) app_status_show(res);
             break;
           }
         }
