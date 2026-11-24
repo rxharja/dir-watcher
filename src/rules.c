@@ -17,6 +17,7 @@
 #include <fnmatch.h>
 #include <config.h>
 #include <stdarg.h>
+#include <unistd.h>
 
 static ParsePair action_pairs[] = {{"move", MOVE}, {"delete", DELETE}, {NULL, 0}};
 
@@ -234,12 +235,15 @@ static ConfigStatus config_pattern_append(Config *cfg, const char *pattern) {
   if (!duped_pattern) return config_status_from_sys(CONFIG_SYSTEM_ERR, errno, CONFIG_RULE_MATCH);
 
   void *new_arr = config_realloc(cfg->patterns, cfg->pattern_count + 1, sizeof(*cfg->patterns));
-  if (!new_arr) return config_status_from_sys(CONFIG_SYSTEM_ERR, errno, CONFIG_RULE_MATCH);
+  if (new_arr) {
+    cfg->patterns = new_arr;
+    cfg->patterns[cfg->pattern_count] = duped_pattern;
+    cfg->pattern_count++;
+    return config_status_ok();
+  } 
 
-  cfg->patterns = new_arr;
-  cfg->patterns[cfg->pattern_count] = duped_pattern;
-  cfg->pattern_count++;
-  return config_status_ok();
+  free(duped_pattern);
+  return config_status_from_sys(CONFIG_SYSTEM_ERR, errno, CONFIG_RULE_MATCH);
 }
 
 static ConfigStatus config_rule_append(Config *cfg, const Rule *rule) {
