@@ -64,6 +64,15 @@ static ConfigStatus config_get_int(toml_datum_t table, const char *key, uint64_t
   return config_status_ok();
 }
 
+static ConfigStatus config_get_int_or(toml_datum_t table, const char *key, uint64_t *out, int or) {
+  toml_datum_t val;
+  ConfigStatus status = config_get(table, key, TOML_INT64, &val);
+  if (status.kind != CONFIG_OK && status.kind != CONFIG_MISSING) return status;
+  if (status.kind == CONFIG_MISSING) *out = or;
+  else *out = val.u.int64;
+  return config_status_ok();
+}
+
 static ConfigStatus config_get_bool_or(toml_datum_t table, const char *key, int *out, int or) {
   toml_datum_t val;
   ConfigStatus status = config_get(table, key, TOML_BOOLEAN, &val);
@@ -369,7 +378,7 @@ static ConfigStatus config_watches_parse(Config *cfg, toml_datum_t watches) {
 
     if (status.kind == CONFIG_OK) status = config_get_string(table,  CONFIG_WATCH_PATH, &path);
     if (status.kind == CONFIG_OK) status = config_path_intern(cfg, CONFIG_WATCH_PATH, path, &watch.path_idx);
-    if (status.kind == CONFIG_OK) status = config_get_int(table, CONFIG_WATCH_SETTLE_SEC, &watch.settle_sec);
+    if (status.kind == CONFIG_OK) status = config_get_int_or(table, CONFIG_WATCH_SETTLE_SEC, &watch.settle_sec, 2);
 
     if (status.kind == CONFIG_OK) watch.exclude_start = cfg->pattern_count;
     if (status.kind == CONFIG_OK) status = config_exclude_parse(table, cfg, &watch.exclude_count);
