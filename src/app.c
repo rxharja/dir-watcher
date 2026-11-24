@@ -168,7 +168,12 @@ AppStatus app_file_move_with_rename(DirHandle *origin, DirHandle *dest, const ch
   char copy_buf[256];
   FileStatus f = file_move(origin, dest, fname, fname, 0);
 
-  if (f.kind == FILE_OK) return app_status_from_file(f);
+  if (f.kind == FILE_OK) {
+    int written = snprintf(new_name_out, NAME_MAX + 1, "%s", fname);
+    assert(written > 0);
+    if (written >= NAME_MAX) return app_status_from_sys(EOVERFLOW, "writing to new_name_out buf");
+    return app_status_from_file(f);
+  }
 
   while (f.kind == FILE_ERR_EXISTS) {
     int written = snprintf(copy_buf, sizeof(copy_buf), " (%lu)", copy++);
@@ -177,6 +182,22 @@ AppStatus app_file_move_with_rename(DirHandle *origin, DirHandle *dest, const ch
     if (f.kind == FILE_ERR_EXISTS) f = file_name_cat(fname, copy_buf, new_name_out);
     if (f.kind == FILE_OK) f = file_move(origin, dest, fname, new_name_out, 0);
   }
+
+  return app_status_from_file(f);
+}
+
+AppStatus app_file_move_with_replace(DirHandle *origin, DirHandle *dest, const char *fname, ReceiptKind *kind) {
+  FileStatus f = file_move(origin, dest, fname, fname, 0);
+
+  if (f.kind == FILE_OK) {
+    *kind = RECEIPT_MOVED;
+    return app_status_from_file(f);
+  }
+  if (f.kind == FILE_ERR_EXISTS) {
+    f = file_move(origin, dest, fname, fname, 1);
+    if (f.kind == FILE_OK) *kind = RECEIPT_REPLACED;
+  }
+
 
   return app_status_from_file(f);
 }
@@ -291,7 +312,6 @@ AppStatus receipt_from_file(AppStatus status, Receipt *out, const Effect *e, Rec
 
 AppStatus app_effect_run(const AppCtx *app, Effect *e, Receipt *out) {
   assert(app);
-  assert(e && e->rule);
 
   const CanonicalPath *o_path = config_watch_path(&app->config, &app->config.watches[e->watch_idx]);
   assert(o_path);
@@ -299,26 +319,70 @@ AppStatus app_effect_run(const AppCtx *app, Effect *e, Receipt *out) {
   if (!e->rule) return app_status_ok();
 
   const CanonicalPath *dest = config_rule_dest(&app->config, e->rule);
-  DirHandle *o_handle = &app->handles.dirs[e->watch_idx];
+  DirHandle *o_handle = &app->handles.dirs[app->config.watches[e->watch_idx].path_idx];
   DirHandle *dest_handle = &app->handles.dirs[e->rule->destination_idx];
   assert(dest && o_handle && dest_handle);
 
   switch (e->rule->action) {
-    case DELETE: return receipt_from_file(app_status_ok(), out, e, RECEIPT_DELETED, "");
+    case DELETE: return receipt_from_file(
+            app_status_from_file(file_delete(o_handle, e->fname)), out, e, RECEIPT_DELETED, "");
     case MOVE:
       switch (e->rule->conflict) {
-        case RENAME: return receipt_from_file(
-            app_file_move_with_rename(o_handle, dest_handle, e->fname, out->final_name), 
-            out, e, RECEIPT_RENAMED, out->final_name);
-        case REPLACE: return receipt_from_file(
-            app_status_from_file(file_move(o_handle, dest_handle, e->fname, e->fname, 1)),
-            out, e, RECEIPT_REPLACED, e->fname);
+        case RENAME: {
+          char new_name[NAME_MAX + 1];
+          AppStatus s = app_file_move_with_rename(o_handle, dest_handle, e->fname, new_name); 
+          ReceiptKind k = strcmp(e->fname, new_name) == 0 ? RECEIPT_MOVED : RECEIPT_RENAMED;
+          return receipt_from_file(s, out, e, k, new_name);
+        }
+        case REPLACE: {
+          ReceiptKind k;
+          AppStatus s = app_file_move_with_replace(o_handle, dest_handle, e->fname, &k);
+          return receipt_from_file(s, out, e, k, e->fname);
+        }
         case NONE: case SKIP: return receipt_from_file(app_status_ok(), out, e, RECEIPT_SKIPPED, e->fname);
         default: return app_status_from_sys(ENOTSUP, "the conflict is not supported");
       }
     default: return app_status_from_sys(ENOTSUP, "the action is not supported");
   }
 } 
+
+static void app_effect_report(const AppCtx *app, const Receipt *r, AppStatus s) {
+  if (s.kind != APP_OK) { app_status_show(s); return; }
+  const CanonicalPath *o_path = config_watch_path(&app->config, &app->config.watches[r->effect.watch_idx]);
+  assert(o_path);
+
+  if (!r->effect.rule) {
+    log_debug("no rules applied to %s/%s", o_path->s, r->effect.fname);
+    return;
+  }
+
+  const CanonicalPath *dest = config_rule_dest(&app->config, r->effect.rule);
+  assert(dest);
+
+  switch (r->kind) {
+    case RECEIPT_UNSET:
+      log_error("something unexpected happened"); 
+      break;
+    case RECEIPT_MOVED: 
+      log_info("%s/%s was moved to %s/%s", o_path->s,r->effect.fname, dest->s, r->final_name); 
+      break;
+    case RECEIPT_RENAMED:
+      log_info("%s/%s was renamed to %s/%s", o_path->s,r->effect.fname, dest->s, r->final_name); 
+      break;
+    case RECEIPT_DELETED:
+      log_info("%s/%s was deleted", o_path->s,r->effect.fname); 
+      break;
+    case RECEIPT_SKIPPED:
+      log_info("%s/%s was excluded", o_path->s,r->effect.fname); 
+      break;
+    case RECEIPT_VANISHED:
+      log_info("%s/%s no longer exists", o_path->s,r->effect.fname); 
+      break;
+    case RECEIPT_REPLACED:
+      log_info("%s/%s replaced %s/%s", o_path->s,r->effect.fname, dest->s, r->final_name); 
+      break;
+  }
+}
 
 AppStatus app_watch_timer_handle(const AppCtx *app, size_t idx) {
   uint64_t expirations;
@@ -348,9 +412,11 @@ AppStatus app_watch_timer_handle(const AppCtx *app, size_t idx) {
     app_effect_describe(app, effect, app->config.dry_run ? LOG_LEVEL_INFO : LOG_LEVEL_DEBUG);
     
     if (app->config.dry_run) res = app_status_ok();
-    else                     res = app_effect_run(app, &effect, &receipt);
+    else {
+      res = app_effect_run(app, &effect, &receipt);
+      app_effect_report(app, &receipt, res);
+    }
 
-    app_status_show(res);
     free(namelist[i]);
   }
 

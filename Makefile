@@ -22,7 +22,7 @@ dir-watcher: $(OBJS) $(VENDOR_OBJS)
 
 build/%.o: src/%.c 
 	@mkdir -p $(@D)
-	$(CC) $(CPPFLAGS) $(DEPFLAGS) $(CFLAGS) -o $@ -c $<
+	$(CC) $(CPPFLAGS) $(DEPFLAGS) $(CFLAGS_DEBUG) -o $@ -c $<
 
 build/vendor/%.o: vendor/%.c 
 	@mkdir -p $(@D)

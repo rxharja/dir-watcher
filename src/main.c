@@ -17,7 +17,7 @@
 #include "log.h"
 
 int main(void) {
-  if (log_init() != 0) log_warn("unknown DIR_WATCH_LOG value, using info");
+  if (log_init() != 0) log_warn("unknown DIR_WATCHER_LOG value, using info");
   AppCtx app = {0};
 
   int poll_num;
