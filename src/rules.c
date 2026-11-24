@@ -206,7 +206,7 @@ static void *config_realloc(void *arr, size_t new_count, size_t elem_size) {
   return realloc(arr, new_count * elem_size);
 }
 
-static ConfigStatus config_path_intern(Config *cfg, const char *key, const char *raw, ssize_t *idx) {
+static ConfigStatus config_path_intern(Config *cfg, const char *key, const char *raw, size_t *idx) {
   assert(cfg && key && raw && idx);
   CanonicalPath path = {0};
 
