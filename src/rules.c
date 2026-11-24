@@ -376,14 +376,15 @@ static ConfigStatus config_rules_parse(Config *cfg, toml_datum_t parent) {
 static ConfigStatus config_watches_parse(Config *cfg, toml_datum_t watches) {
   assert(cfg);
   assert(watches.type == TOML_ARRAY);
-  toml_datum_t rules;
-  const char *path;
   ConfigStatus status = config_status_ok();
 
   for (int i = 0; i < watches.u.arr.size; i++) {
+    const char *path;
     Watch watch = {0};
+    toml_datum_t rules;
     toml_datum_t table = watches.u.arr.elem[i];
     watch.rule_start = cfg->total_rule_count; // watch rules are optional
+                                              //
     if (status.kind == CONFIG_OK) status = config_get(table, CONFIG_RULE, TOML_ARRAY, &rules);
     if (status.kind == CONFIG_OK) status = config_rules_parse(cfg, rules);
     if (status.kind == CONFIG_MISSING && cfg->global_rule_count > 0) status = config_status_ok(); 
@@ -406,8 +407,7 @@ static ConfigStatus config_parse(Config *cfg, const toml_result_t *result) {
   assert(result->ok);
 
   toml_datum_t rules, watches;
-
-                ConfigStatus err = config_get_int(result->toptab, CONFIG_VERSION, &cfg->version); 
+  ConfigStatus err = config_get_int(result->toptab, CONFIG_VERSION, &cfg->version); 
   if (err.kind == CONFIG_OK) err = config_get_bool_or(result->toptab, CONFIG_DRY_RUN, &cfg->dry_run, 0); 
   if (err.kind == CONFIG_OK) err = config_exclude_parse(result->toptab, cfg, &cfg->exclude_count);
   if (err.kind == CONFIG_OK) err = config_get(result->toptab, CONFIG_RULE, TOML_ARRAY, &rules); 
