@@ -66,7 +66,8 @@ int main(void) {
       for (size_t i = 2; i < nfds; i++) {
         if (fds[i].revents & POLLIN) {
           // subtracting 2 to shift it back to watch path count
-          app_watch_timer_handle(&app, i - 2); 
+          AppStatus s = app_watch_timer_handle(&app, i - 2); 
+          app_status_show(s);
         }
       }
 
@@ -84,8 +85,10 @@ int main(void) {
       }
 
       // inotify events 
-      if (fds[1].revents & POLLIN) app_events_handle(&app);
-
+      if (fds[1].revents & POLLIN) {
+        AppStatus s = app_events_handle(&app);
+        app_status_show(s);
+      }
     }
   }
 

@@ -427,9 +427,7 @@ AppStatus app_watch_timer_handle(const AppCtx *app, size_t idx) {
 
 AppStatus app_events_handle(const AppCtx *app) {
   assert(app);
-
-  __attribute__((aligned(__alignof__(struct inotify_event))))
-  char buf[sizeof(struct inotify_event) + NAME_MAX + 1];
+  __attribute__((aligned(__alignof__(struct inotify_event)))) char buf[4096];
   const struct inotify_event *event; 
   ssize_t size;
 
