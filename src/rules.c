@@ -269,7 +269,10 @@ static ConfigStatus config_watch_append(Config *cfg, const Watch *watch) {
 static ConfigStatus config_exclude_parse(const toml_datum_t tab, Config *cfg, size_t *count) {
   toml_datum_t ignore_list;
   ConfigStatus status = config_get(tab, CONFIG_EXCLUDE, TOML_ARRAY, &ignore_list);
-  if (status.kind == CONFIG_MISSING) return config_status_ok();
+  if (status.kind == CONFIG_MISSING) {
+    *count = 0;
+    return config_status_ok();
+  }
   else if (status.kind != CONFIG_OK) return status;
   size_t pattern_start = cfg->pattern_count;
   
@@ -350,24 +353,27 @@ static ConfigStatus config_rules_parse(Config *cfg, toml_datum_t parent) {
 
 static ConfigStatus config_watches_parse(Config *cfg, toml_datum_t watches) {
   assert(cfg);
-  Watch watch = {0};
   toml_datum_t rules;
   const char *path;
   ConfigStatus status = config_status_ok();
 
   for (int i = 0; i < watches.u.arr.size; i++) {
+    Watch watch = {0};
     toml_datum_t table = watches.u.arr.elem[i];
     // watch rules are optional
+    watch.rule_start = cfg->total_rule_count;
     if (status.kind == CONFIG_OK) status = config_get(table, CONFIG_RULE, TOML_ARRAY, &rules);
     if (status.kind == CONFIG_OK) status = config_rules_parse(cfg, rules);
     if (status.kind == CONFIG_MISSING && cfg->global_rule_count > 0) status = config_status_ok(); 
     if (status.kind == CONFIG_OK) watch.rule_count = cfg->total_rule_count - watch.rule_start;
+
     if (status.kind == CONFIG_OK) status = config_get_string(table,  CONFIG_WATCH_PATH, &path);
     if (status.kind == CONFIG_OK) status = config_path_intern(cfg, CONFIG_WATCH_PATH, path, &watch.path_idx);
     if (status.kind == CONFIG_OK) status = config_get_int(table, CONFIG_WATCH_SETTLE_SEC, &watch.settle_sec);
+
     if (status.kind == CONFIG_OK) watch.exclude_start = cfg->pattern_count;
     if (status.kind == CONFIG_OK) status = config_exclude_parse(table, cfg, &watch.exclude_count);
-    if (status.kind == CONFIG_OK) watch.rule_start = cfg->total_rule_count;
+
     if (status.kind == CONFIG_OK) status = config_watch_append(cfg, &watch);
     else return status;
   }
