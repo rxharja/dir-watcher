@@ -1,24 +1,38 @@
 version = 1
 
-[defaults]
-on_conflict = "rename" # rename | skip | overwrite
-dest_path = "~/projects/dir-watcher/output"
 dry_run = false
 
-[[watch]]
-path="~/"
-# ignore = ["*.part", "*.crdownload", "*.env"]
-settle_seconds = 2
+# global exclude across all watched directories 
+# exclude = ["*.pdf"]
+
+# delete :Zone.Identifier files on WSL
+[[rule]]
+action = "delete"
+match = ["*:Zone.Identifier"]
+
+# move scattered notes from all watched dirs into ~/notes
+# [[rule]]
+# action = "move"
+# destination = "~/notes"
+# match = ["*.md", "*.txt"]
+
+# [[watch]]
+# path = "~/"
+# settle_seconds = 5
+# # local exclude to the watched directory
+# exclude = ["*.env"]
 
 [[watch]]
-path="~/Downloads"
-# ignore = ["*.part", "*.crdownload"]
-settle_seconds = 2
+path = "~/Downloads"
 
-[[dest]]
-path="~/notes"
-extensions=["*.txt", "*.md"]
+  [[watch.rule]]
+  action = "move"
+  destination = "~/Documents"
+  match = ["*.pdf", "*.docx", "*.odt"]
+  # local exclude to the watched rule
+  # exclude = ["invoice-*.pdf"]
 
-[[dest]]
-path="~/archives"
-extensions=["*.tar", "*.tar.gz", "*.zip"]
+  [[watch.rule]]
+  action = "move"
+  destination = "~/archives"
+  match = ["*.zip", "*.tar.gz"]

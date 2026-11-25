@@ -155,11 +155,8 @@ static FileStatus file_relative_expand(const char *dir_path, char *out) {
 
   CanonicalPath config_path = {0};
   FileStatus err = file_config_dir_get(&config_path);
-
-  if (err.kind == FILE_OK || err.kind == FILE_ERR_NOT_FOUND) {
-    err = file_path_cat(config_path.s, dir_path, out);
-  }
-  if (err.kind != FILE_OK) err.path = dir_path;
+  if (err.kind == FILE_OK) err = file_path_cat(config_path.s, dir_path, out);
+  else                     err.path = dir_path;
 
   return err;
 }
@@ -189,17 +186,28 @@ FileStatus file_normalize(const char *dir_path, CanonicalPath *out) {
   if (realpath(to_resolve, out->s) != NULL) return file_ok();
 
   int e = errno;
-  if (e != ENOENT) return file_from_errno(errno, path_raw);
+  if (e != ENOENT) return file_from_errno(e, dir_path);
 
   size_t len = strlen(to_resolve);
   if (len >= sizeof(out->s)) return file_fail(FILE_ERR_PATH_TOO_LONG, dir_path);
   memcpy(out, to_resolve, len + 1);
-  return file_from_errno(ENOENT, dir_path);
+  return file_ok();
 }
 
-// invariant: fully qualified path
+void file_path_slash_collapse(char *s) {
+  assert(s);
+
+  size_t write = 0;
+  for(size_t read = 0; s[read] != '\0'; read++) {
+    if (s[read] == '/' && write > 0 && s[write - 1] == '/') continue;
+    s[write++] = s[read];
+  }
+
+  s[write] = '\0';
+}
+
 FileStatus file_dir_create(const CanonicalPath *dir_path) {
-  assert(dir_path);
+  assert_canonical(dir_path);
 
   char path_to_create[PATH_MAX];
   sprintf(path_to_create, "%s", dir_path->s);
@@ -224,7 +232,8 @@ FileStatus file_dir_create(const CanonicalPath *dir_path) {
 }
 
 FileStatus file_dir_open(const CanonicalPath *dir_path, int *dir_fd) {
-  assert(dir_path && dir_fd);
+  assert_canonical(dir_path);
+  assert(dir_fd);
 
   *dir_fd = open(dir_path->s, O_PATH | O_CLOEXEC | O_DIRECTORY);
   if (*dir_fd == -1) return file_from_errno(errno, dir_path->s);
@@ -261,19 +270,61 @@ FileStatus file_delete(const DirHandle *origin, const char *fname) {
 
 
 FileStatus file_dir_ensure_open(const CanonicalPath *path, int *fd, dev_t *st_dev) {
+  assert_canonical(path);
   FileStatus err = file_dir_create(path);
-
   if (err.kind == FILE_OK) err = file_dir_open(path, fd);
-  else { close(*fd); *fd = -1; }
-
   if (err.kind == FILE_OK) err = file_dir_stat(*fd, st_dev);
-
   return err;
 }
 
-FileStatus file_config_path_get(CanonicalPath *out) {
+static FileStatus file_config_assert_exists(CanonicalPath *path) {
+  assert_canonical(path);
+  FILE *f = fopen(path->s, "r");
+  if (!f)             return file_from_errno(errno, path->s);
+  if (fclose(f) != 0) return file_from_errno(errno, path->s);
+  return file_ok();
+}
+
+FileStatus file_config_write(CanonicalPath *path, const char *config, const size_t s) {
+  assert_canonical(path);
+  assert(config);
+  assert(s > 0);
+
+  FILE *f = fopen(path->s, "wx");
+  if (!f) return file_from_errno(errno, path->s);
+
+  errno = 0;
+  const size_t written = fwrite(config, sizeof(char), s, f);
+  const int errno_fwrite = errno;
+
+  const int close_result = fclose(f);
+  const int close_errno = errno;
+
+  if (written != s) {
+    (void)unlink(path->s);
+    return file_from_errno(errno_fwrite!= 0 ? errno_fwrite: EIO, path->s);
+  }
+
+  if (close_result != 0) {
+    (void)unlink(path->s);
+    return file_from_errno(close_errno, path->s);
+  }
+
+  return file_ok();
+}
+
+FileStatus file_config_path_get(CanonicalPath *out, const char *config, int *created) {
+  assert(out);
+  assert(config);
+
   CanonicalPath config_dir;
   FileStatus status = file_config_dir_get(&config_dir);
   if (status.kind == FILE_OK) status = file_path_cat(config_dir.s, "config.toml", out->s);
+  if (status.kind == FILE_OK) status = file_config_assert_exists(out);
+  if (status.kind == FILE_OK) return status; // exit here if already exists
+  if (status.kind == FILE_ERR_NOT_FOUND) status = file_dir_create(&config_dir);
+  if (status.kind == FILE_OK) status = file_config_write(out, config, strlen(config));
+  if (status.kind == FILE_OK) *created = 1;
+  else status.path = "config directory"; // file_dir_create tries populating a local
   return status;
 }

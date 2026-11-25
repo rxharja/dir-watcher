@@ -1,3 +1,4 @@
 dir-watcher
 build/
 *.o
+*.tar.gz

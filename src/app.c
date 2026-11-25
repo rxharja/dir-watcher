@@ -23,6 +23,46 @@
 #include <dirent.h>
 #include "app.h"
 
+static const char default_config[] = 
+  "version = 1\n"
+  "\n"
+  "dry_run = true\n"
+  "\n"
+  "# global exclude across all watched directories \n"
+  "# exclude = [\"*.pdf\"]\n"
+  "\n"
+  "# delete :Zone.Identifier files on WSL\n"
+  "[[rule]]\n"
+  "action = \"delete\"\n"
+  "match = [\"*:Zone.Identifier\"]\n"
+  "\n"
+  "# move scattered notes from all watched dirs into ~/notes\n"
+  "# [[rule]]\n"
+  "# action = \"move\"\n"
+  "# destination = \"~/notes\"\n"
+  "# match = [\"*.md\", \"*.txt\"]\n"
+  "\n"
+  "# [[watch]]\n"
+  "# path = \"~/\"\n"
+  "# settle_seconds = 5\n"
+  "# # local exclude to the watched directory\n"
+  "# exclude = [\"*.env\"]\n"
+  "\n"
+  "[[watch]]\n"
+  "path = \"~/Downloads\"\n"
+  "\n"
+  "  [[watch.rule]]\n"
+  "  action = \"move\"\n"
+  "  destination = \"~/Documents\"\n"
+  "  match = [\"*.pdf\", \"*.docx\", \"*.odt\"]\n"
+  "  # local exclude to the watched rule\n"
+  "  # exclude = [\"invoice-*.pdf\"]\n"
+  "\n"
+  "  [[watch.rule]]\n"
+  "  action = \"move\"\n"
+  "  destination = \"~/archives\"\n"
+  "  match = [\"*.zip\", \"*.tar.gz\"]\n";
+
 static AppStatus app_status_from_config(ConfigStatus config) {
   if (config.kind == CONFIG_OK) return (AppStatus) {.kind = APP_OK };
   return (AppStatus) { .kind = APP_CONFIG, .u.config = config };
@@ -151,12 +191,17 @@ void app_destroy(AppCtx *app) {
   app_handles_close(&app->handles);
 }
 
-AppStatus app_setup(AppCtx *app) {
+AppStatus app_setup(AppCtx *app, int *created) {
   assert(app);
 
   app_handles_reset(&app->handles);
   CanonicalPath config_path = {0};
-  AppStatus status = app_status_from_file(file_config_path_get(&config_path));
+  AppStatus status = app_status_from_file(file_config_path_get(&config_path, default_config, created));
+  if (status.kind == APP_OK && created) {
+    log_info("Config created at %s. Edit the config and run again", config_path.s);
+    return status;
+  }
+
   if (status.kind == APP_OK) status = app_status_from_config(config_build(&app->config, &config_path));
   if (status.kind == APP_OK) status = app_handles_open(&app->config, &app->handles);
   if (status.kind != APP_OK) app_destroy(app);

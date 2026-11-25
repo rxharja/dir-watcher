@@ -8,6 +8,13 @@
 // ensures the path is absolute 
 typedef struct { char s[PATH_MAX]; } CanonicalPath;
 
+// a canonical path is an absolute path starting with '/'
+#define assert_canonical(p)   \
+  do {                        \
+    assert((p) != NULL);      \
+    assert((p)->s[0] == '/'); \
+  } while (0)
+
 typedef struct { int fd; dev_t st_dev; } DirHandle;
 
 typedef struct { 
@@ -73,8 +80,7 @@ FileStatus file_path_cat(const char *part1, const char *part2, char* out);
 __attribute__((warn_unused_result))
 FileStatus file_name_cat(const char *part1, const char *part2, char* out);
 
-__attribute__((warn_unused_result))
-FileStatus file_config_path_get(CanonicalPath *out);
+FileStatus file_config_path_get(CanonicalPath *out, const char *config, int *created);
 
 void file_status_show(FileStatus s);
 

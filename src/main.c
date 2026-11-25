@@ -25,10 +25,11 @@ int main(void) {
   struct signalfd_siginfo fdsi;
   ssize_t signal_size;
 
-
   struct pollfd *fds = NULL;
-  AppStatus res = app_setup(&app);
+  int created = 0;
+  AppStatus res = app_setup(&app, &created);
   if (res.kind != APP_OK) goto fail;
+  if (res.kind == APP_OK && created) { app_destroy(&app); exit(0); }
 
   app_watches_log(&app.config);
 
@@ -99,6 +100,7 @@ int main(void) {
 
 fail:
   app_status_show(res);
+  app_destroy(&app);
   if (fds) free(fds);
   exit(EXIT_FAILURE);
 }

@@ -430,6 +430,8 @@ void config_destroy(Config *cfg) {
 }
 
 ConfigStatus config_build(Config *cfg, const CanonicalPath *config_path) {
+  assert(cfg);
+  assert_canonical(config_path);
   *cfg = (Config){0};
 
   const toml_result_t result = toml_parse_file_ex(config_path->s);

@@ -64,7 +64,7 @@ AppStatus app_effect_run(const AppCtx *app, Effect *e, Receipt *out);
 
 void app_effect_describe(const AppCtx *app, Effect effect, LogLevel level);
 
-AppStatus app_setup(AppCtx *app);
+AppStatus app_setup(AppCtx *app, int *created);
 
 void app_destroy(AppCtx *app);
 
