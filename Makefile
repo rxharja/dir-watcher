@@ -48,7 +48,7 @@ archive:
 	@test -n "$(VERSION)" || { echo "VERSION is not set" >&2; exit 1; }
 	@mkdir -p build
 	@git archive --prefix=dir-watcher-$(VERSION)/ -o dir-watcher-$(VERSION).tar $(VERSION) 
-	@git -C vendor/tomlc17 archive --prefix=dir-watcher-$(VERSION)/vendor/tomlc17 \
+	@git -C vendor/tomlc17 archive --prefix=dir-watcher-$(VERSION)/vendor/tomlc17/ \
 		-o $(CURDIR)/build/tomlc17.tar $$(git rev-parse $(VERSION):vendor/tomlc17)
 	@tar --concatenate --file=dir-watcher-$(VERSION).tar build/tomlc17.tar
 	@rm build/tomlc17.tar
