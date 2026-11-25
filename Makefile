@@ -1,13 +1,16 @@
 CC            := gcc
-CFLAGS        := -std=gnu99 -Wall -Wextra -Wswitch-enum 
-BUILD ?= release
+CFLAGS_LOCAL  := -std=gnu99 -Wall -Wextra -Wswitch-enum 
+CFLAGS_VENDOR := -std=c17 -g
+CFLAGS        += $(CFLAGS_LOCAL)
+BUILD         ?= release
 
 ifeq ($(BUILD),release)
-	CFLAGS      := $(CFLAGS) -O2 
-	BUILD_DIR   := build/release
+	CFLAGS        += -O2 
+	CFLAGS_VENDOR += -O2 
+	BUILD_DIR     := build/release
 else
-	CFLAGS      := $(CFLAGS) -g -fsanitize=address,undefined
-	BUILD_DIR   := build/debug
+	CFLAGS        += -g -fsanitize=address,undefined
+	BUILD_DIR     := build/debug
 endif
 
 DEPFLAGS      := -MMD -MP 
@@ -17,15 +20,17 @@ SRCS          := $(wildcard src/*.c)
 OBJS          := $(SRCS:src/%.c=$(BUILD_DIR)/%.o)
 DEPS          := $(OBJS:.o=.d)
 
-VENDOR_CFLAGS := -std=c17 -g
 VENDOR_SRCS   := $(wildcard vendor/tomlc17/src/*.c)
 VENDOR_OBJS   := $(VENDOR_SRCS:vendor/%.c=$(BUILD_DIR)/vendor/%.o)
 VENDOR_DEPS   := $(VENDOR_OBJS:.o=.d)
 
+DESTDIR       ?= /usr/local
+PREFIX        ?= /usr/local
+
 all: dir-watcher
 
 dir-watcher: $(OBJS) $(VENDOR_OBJS)
-	$(CC) $(CFLAGS) -o $(BUILD_DIR)/$@ $^
+	$(CC) $(CFLAGS) $(LDFLAGS) -o $(BUILD_DIR)/$@ $^
 	@ln -s -f $(BUILD_DIR)/$@ $@
 
 $(BUILD_DIR)/%.o: src/%.c 
@@ -34,11 +39,14 @@ $(BUILD_DIR)/%.o: src/%.c
 
 $(BUILD_DIR)/vendor/%.o: vendor/%.c 
 	@mkdir -p $(@D)
-	$(CC) $(DEPFLAGS) $(VENDOR_CFLAGS) -o $@ -c $<
+	$(CC) $(DEPFLAGS) $(CFLAGS_VENDOR) -o $@ -c $<
 
 # if I ever have to change the tomlc17 header and have its
 # updates be caught by make
 $(OBJS): $(wildcard vendor/tomlc17/src/*.h)
+
+install:
+	@install -Dm755 $(BUILD_DIR)/dir-watcher $(DESTDIR)$(PREFIX)/bin/dir-watcher
 
 clean:
 	rm -rf build dir-watcher
