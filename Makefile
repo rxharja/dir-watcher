@@ -46,13 +46,13 @@ $(OBJS): $(wildcard vendor/tomlc17/src/*.h)
 
 archive:
 	@test -n "$(VERSION)" || { echo "VERSION is not set" >&2; exit 1; }
-	@git archive --format=tar --prefix=dir-watcher-$(VERSION)/ $(VERSION) > dir-watcher-$(VERSION).tar 
-	@git submodule foreach --recursive '\
-		git archive --prefix="dir-watcher-$(VERSION)/$$displaypath/" --format=tar -o /tmp/sub-$$sha1.tar $$sha1 && \
-		tar --concatenate --file="$$toplevel/dir-watcher-$(VERSION).tar" /tmp/sub-$$sha1.tar && \
-		rm /tmp/sub-$$sha1.tar \
-	'
-	gzip dir-watcher-$(VERSION).tar
+	@mkdir -p build
+	@git archive --prefix=dir-watcher-$(VERSION)/ -o dir-watcher-$(VERSION).tar $(VERSION) 
+	@git -C vendor/tomlc17 archive --prefix=dir-watcher-$(VERSION)/vendor/tomlc17 \
+		-o $(CURDIR)/build/tomlc17.tar $$(git rev-parse $(VERSION):vendor/tomlc17)
+	@tar --concatenate --file=dir-watcher-$(VERSION).tar build/tomlc17.tar
+	@rm build/tomlc17.tar
+	@gzip -f dir-watcher-$(VERSION).tar
 
 install:
 	@install -Dm755 $(BUILD_DIR)/dir-watcher $(DESTDIR)$(PREFIX)/bin/dir-watcher
