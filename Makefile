@@ -1,30 +1,38 @@
 CC            := gcc
 CFLAGS        := -std=gnu99 -Wall -Wextra -Wswitch-enum 
-CFLAGS_DEBUG  := $(CFLAGS) -g -fsanitize=address,undefined
- 
+BUILD ?= release
+
+ifeq ($(BUILD),release)
+	CFLAGS      := $(CFLAGS) -O2 
+	BUILD_DIR   := build/release
+else
+	CFLAGS      := $(CFLAGS) -g -fsanitize=address,undefined
+	BUILD_DIR   := build/debug
+endif
+
 DEPFLAGS      := -MMD -MP 
 CPPFLAGS      := -Iinclude -isystem vendor/tomlc17/src -D_GNU_SOURCE
 
 SRCS          := $(wildcard src/*.c)
-OBJS          := $(SRCS:src/%.c=build/%.o)
-
+OBJS          := $(SRCS:src/%.c=$(BUILD_DIR)/%.o)
 DEPS          := $(OBJS:.o=.d)
 
 VENDOR_CFLAGS := -std=c17 -g
 VENDOR_SRCS   := $(wildcard vendor/tomlc17/src/*.c)
-VENDOR_OBJS   := $(VENDOR_SRCS:vendor/%.c=build/vendor/%.o)
+VENDOR_OBJS   := $(VENDOR_SRCS:vendor/%.c=$(BUILD_DIR)/vendor/%.o)
 VENDOR_DEPS   := $(VENDOR_OBJS:.o=.d)
 
 all: dir-watcher
 
 dir-watcher: $(OBJS) $(VENDOR_OBJS)
-	$(CC) $(CFLAGS_DEBUG) -o $@ $^
+	$(CC) $(CFLAGS) -o $(BUILD_DIR)/$@ $^
+	@ln -s -f $(BUILD_DIR)/$@ $@
 
-build/%.o: src/%.c 
+$(BUILD_DIR)/%.o: src/%.c 
 	@mkdir -p $(@D)
-	$(CC) $(CPPFLAGS) $(DEPFLAGS) $(CFLAGS_DEBUG) -o $@ -c $<
+	$(CC) $(CPPFLAGS) $(DEPFLAGS) $(CFLAGS) -o $@ -c $<
 
-build/vendor/%.o: vendor/%.c 
+$(BUILD_DIR)/vendor/%.o: vendor/%.c 
 	@mkdir -p $(@D)
 	$(CC) $(DEPFLAGS) $(VENDOR_CFLAGS) -o $@ -c $<
 
